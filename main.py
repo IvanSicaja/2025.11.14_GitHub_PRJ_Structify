@@ -1,18 +1,33 @@
+# Folder Structure Replicator (Updated)
+# Changes applied:
+# 1. Toggle to scan only root folders OR full recursive structure
+# 2. Ensure NO files are ever listed (folders only)
+# 3. Preview text color forced to black for white background
+
 import sys
 import os
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
-    QMessageBox, QStyleFactory
+    QMessageBox, QStyleFactory, QCheckBox
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont
 
-def get_folder_structure(root_path):
-    """Returns only folder tree with 2-space indentation"""
+
+def get_folder_structure(root_path, recursive=True):
+    """Return folder structure. If recursive=False, only root-level folders are listed."""
     structure = []
+
+    if not recursive:
+        for name in sorted(os.listdir(root_path)):
+            full_path = os.path.join(root_path, name)
+            if os.path.isdir(full_path):
+                structure.append(name)
+        return structure
+
     for dirpath, dirnames, _ in os.walk(root_path, topdown=True):
-        dirnames.sort()  # consistent order
+        dirnames.sort()
         rel_path = os.path.relpath(dirpath, root_path)
         if rel_path == '.':
             continue
@@ -20,7 +35,9 @@ def get_folder_structure(root_path):
         indent = '  ' * depth
         folder_name = os.path.basename(dirpath)
         structure.append(f"{indent}{folder_name}")
+
     return structure
+
 
 class FolderStructureApp(QMainWindow):
     def __init__(self):
@@ -29,7 +46,6 @@ class FolderStructureApp(QMainWindow):
         self.resize(720, 580)
         self.setMinimumSize(QSize(600, 480))
 
-        # Try to use a modern style
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
 
@@ -41,7 +57,6 @@ class FolderStructureApp(QMainWindow):
 
         # ── Path row ───────────────────────────────────────
         path_layout = QHBoxLayout()
-        path_layout.setSpacing(8)
 
         self.path_label = QLabel("Folder:")
         self.path_label.setFixedWidth(70)
@@ -59,9 +74,18 @@ class FolderStructureApp(QMainWindow):
 
         self.main_layout.addLayout(path_layout)
 
+        # ── Options row ────────────────────────────────────
+        options_layout = QHBoxLayout()
+
+        self.chk_recursive = QCheckBox("Scan subfolders recursively")
+        self.chk_recursive.setChecked(True)
+        options_layout.addWidget(self.chk_recursive)
+        options_layout.addStretch()
+
+        self.main_layout.addLayout(options_layout)
+
         # ── Action buttons ─────────────────────────────────
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
 
         self.btn_scan = QPushButton("Scan")
         self.btn_scan.clicked.connect(self.scan_structure)
@@ -85,10 +109,11 @@ class FolderStructureApp(QMainWindow):
 
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setFont(QFont("SF Mono", 12))  # or Menlo, Monaco, Consolas
+        self.preview.setFont(QFont("SF Mono", 12))
         self.preview.setStyleSheet("""
             QTextEdit {
-                background-color: #f8f9fa;
+                background-color: #ffffff;
+                color: #000000;
                 border: 1px solid #d0d4d8;
                 border-radius: 6px;
                 padding: 8px;
@@ -108,7 +133,7 @@ class FolderStructureApp(QMainWindow):
             return
 
         try:
-            lines = get_folder_structure(path)
+            lines = get_folder_structure(path, self.chk_recursive.isChecked())
             self.preview.setPlainText("\n".join(lines))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
@@ -120,7 +145,7 @@ class FolderStructureApp(QMainWindow):
             return
 
         try:
-            lines = get_folder_structure(path)
+            lines = get_folder_structure(path, self.chk_recursive.isChecked())
             txt_path = os.path.join(path, "folder_structure.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
@@ -161,15 +186,14 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create folders:\n{str(e)}")
 
+
 def main():
     app = QApplication(sys.argv)
-    # Optional: try to get more macOS-like appearance
     app.setStyle("Fusion")
-    # You can also set app.setStyleSheet(...) with more custom CSS
-
     window = FolderStructureApp()
     window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
