@@ -6,7 +6,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QStyleFactory, QCheckBox
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
+
 
 def get_folder_structure(root_path, recursive=True):
     """Return folder structure. If recursive=False, only root-level folders are listed."""
@@ -17,25 +18,29 @@ def get_folder_structure(root_path, recursive=True):
             if os.path.isdir(full_path):
                 structure.append(name)
         return structure
+
     for dirpath, dirnames, _ in os.walk(root_path, topdown=True):
         dirnames.sort()
         rel_path = os.path.relpath(dirpath, root_path)
         if rel_path == '.':
             continue
         depth = rel_path.count(os.sep)
-        indent = '  ' * depth  # Use 2 spaces per level for consistency with parser
+        indent = '  ' * depth  # consistent 2-space indent
         folder_name = os.path.basename(dirpath)
         structure.append(f"{indent}{folder_name}")
     return structure
 
+
 class FolderStructureApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Folder Structure Replicator")
+        self.setWindowTitle("Structify - Folder Structure Replicator")
         self.resize(1440, 580)
         self.setMinimumSize(QSize(1200, 480))
+
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
+
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -52,7 +57,7 @@ class FolderStructureApp(QMainWindow):
         left_layout.setSpacing(12)
         panels_layout.addLayout(left_layout, stretch=1)
 
-        left_title = QLabel("Left Side")
+        left_title = QLabel("Source Folder 1")
         left_title.setStyleSheet("font-weight: bold; font-size: 14px;")
         left_layout.addWidget(left_title)
 
@@ -84,23 +89,43 @@ class FolderStructureApp(QMainWindow):
         # Action buttons
         left_btn_layout = QHBoxLayout()
         left_btn_layout.setSpacing(10)
+
         self.left_btn_scan = QPushButton("Scan")
         self.left_btn_scan.clicked.connect(self.scan_left)
+
         self.left_btn_export = QPushButton("Export TXT")
         self.left_btn_export.clicked.connect(self.export_left)
-        self.left_btn_create_txt = QPushButton("Create from TXT")
-        self.left_btn_create_txt.clicked.connect(self.create_from_txt_left)
-        self.left_btn_replicate = QPushButton("Replicate Structure")
+
+        self.left_btn_import = QPushButton("Import TXT")
+        self.left_btn_import.clicked.connect(self.create_from_txt_left)
+
+        self.left_btn_replicate = QPushButton("Replicate Preview")
         self.left_btn_replicate.clicked.connect(self.replicate_left)
-        for btn in (self.left_btn_scan, self.left_btn_export, self.left_btn_create_txt, self.left_btn_replicate):
+        self.left_btn_replicate.setStyleSheet("""
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0077e6;
+            }
+            QPushButton:pressed {
+                background-color: #0055b3;
+            }
+        """)
+
+        for btn in (self.left_btn_scan, self.left_btn_export, self.left_btn_import, self.left_btn_replicate):
             btn.setFixedHeight(36)
             left_btn_layout.addWidget(btn)
+
         left_layout.addLayout(left_btn_layout)
 
         # Preview area
         left_preview_label = QLabel("Structure Preview")
         left_preview_label.setStyleSheet("font-weight: bold; font-size: 13px;")
         left_layout.addWidget(left_preview_label)
+
         self.left_preview = QTextEdit()
         self.left_preview.setReadOnly(True)
         self.left_preview.setFont(QFont("SF Mono", 12))
@@ -135,7 +160,7 @@ class FolderStructureApp(QMainWindow):
         right_layout.setSpacing(12)
         panels_layout.addLayout(right_layout, stretch=1)
 
-        right_title = QLabel("Right Side")
+        right_title = QLabel("Source Folder 2")
         right_title.setStyleSheet("font-weight: bold; font-size: 14px;")
         right_layout.addWidget(right_title)
 
@@ -167,23 +192,43 @@ class FolderStructureApp(QMainWindow):
         # Action buttons
         right_btn_layout = QHBoxLayout()
         right_btn_layout.setSpacing(10)
+
         self.right_btn_scan = QPushButton("Scan")
         self.right_btn_scan.clicked.connect(self.scan_right)
+
         self.right_btn_export = QPushButton("Export TXT")
         self.right_btn_export.clicked.connect(self.export_right)
-        self.right_btn_create_txt = QPushButton("Create from TXT")
-        self.right_btn_create_txt.clicked.connect(self.create_from_txt_right)
-        self.right_btn_replicate = QPushButton("Replicate Structure")
+
+        self.right_btn_import = QPushButton("Import TXT")
+        self.right_btn_import.clicked.connect(self.create_from_txt_right)
+
+        self.right_btn_replicate = QPushButton("Replicate Preview")
         self.right_btn_replicate.clicked.connect(self.replicate_right)
-        for btn in (self.right_btn_scan, self.right_btn_export, self.right_btn_create_txt, self.right_btn_replicate):
+        self.right_btn_replicate.setStyleSheet("""
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0077e6;
+            }
+            QPushButton:pressed {
+                background-color: #0055b3;
+            }
+        """)
+
+        for btn in (self.right_btn_scan, self.right_btn_export, self.right_btn_import, self.right_btn_replicate):
             btn.setFixedHeight(36)
             right_btn_layout.addWidget(btn)
+
         right_layout.addLayout(right_btn_layout)
 
         # Preview area
         right_preview_label = QLabel("Structure Preview")
         right_preview_label.setStyleSheet("font-weight: bold; font-size: 13px;")
         right_layout.addWidget(right_preview_label)
+
         self.right_preview = QTextEdit()
         self.right_preview.setReadOnly(True)
         self.right_preview.setFont(QFont("SF Mono", 12))
@@ -292,7 +337,7 @@ class FolderStructureApp(QMainWindow):
             return
         try:
             self.create_from_lines(dest, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated.")
+            QMessageBox.information(self, "Success", "Folder structure replicated from preview.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate structure:\n{str(e)}")
 
@@ -362,9 +407,10 @@ class FolderStructureApp(QMainWindow):
             return
         try:
             self.create_from_lines(dest, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated.")
+            QMessageBox.information(self, "Success", "Folder structure replicated from preview.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate structure:\n{str(e)}")
+
 
 def main():
     app = QApplication(sys.argv)
@@ -372,6 +418,7 @@ def main():
     window = FolderStructureApp()
     window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
