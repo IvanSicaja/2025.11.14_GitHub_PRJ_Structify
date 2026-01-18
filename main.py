@@ -204,7 +204,6 @@ class FolderStructureApp(QMainWindow):
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
 
-            # Improved message with Open Folder button
             msg = QMessageBox(self)
             msg.setWindowTitle("Export Successful")
             msg.setIcon(QMessageBox.Icon.Information)
@@ -212,7 +211,6 @@ class FolderStructureApp(QMainWindow):
             msg.setInformativeText(f"Location:\n{txt_path}")
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-
             msg.exec()
 
             if msg.clickedButton() == open_btn:
@@ -254,7 +252,19 @@ class FolderStructureApp(QMainWindow):
 
         try:
             self.create_from_lines(dest_folder, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated.")
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Replication Successful")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Folder structure replicated.")
+            msg.setInformativeText(f"Created in:\n{dest_folder}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+            msg.exec()
+
+            if msg.clickedButton() == open_btn:
+                self._open_folder(dest_folder)
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
@@ -288,7 +298,6 @@ class FolderStructureApp(QMainWindow):
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
 
-            # Same improved message as left side
             msg = QMessageBox(self)
             msg.setWindowTitle("Export Successful")
             msg.setIcon(QMessageBox.Icon.Information)
@@ -296,7 +305,6 @@ class FolderStructureApp(QMainWindow):
             msg.setInformativeText(f"Location:\n{txt_path}")
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-
             msg.exec()
 
             if msg.clickedButton() == open_btn:
@@ -338,7 +346,19 @@ class FolderStructureApp(QMainWindow):
 
         try:
             self.create_from_lines(dest_folder, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated.")
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Replication Successful")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Folder structure replicated.")
+            msg.setInformativeText(f"Created in:\n{dest_folder}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+            msg.exec()
+
+            if msg.clickedButton() == open_btn:
+                self._open_folder(dest_folder)
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
