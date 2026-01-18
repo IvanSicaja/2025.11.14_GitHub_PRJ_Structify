@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
@@ -53,25 +54,15 @@ class FolderStructureApp(QMainWindow):
 
         # Left panel
         self._setup_panel(
-            panels_layout,
-            "Source Folder 1",
-            "left",
-            self.scan_left,
-            self.export_left,
-            self.import_txt_left,
-            self.replicate_left,
+            panels_layout, "Source Folder 1", "left",
+            self.scan_left, self.export_left, self.import_txt_left, self.replicate_left,
             self.browse_left_source
         )
 
         # Right panel
         self._setup_panel(
-            panels_layout,
-            "Source Folder 2",
-            "right",
-            self.scan_right,
-            self.export_right,
-            self.import_txt_right,
-            self.replicate_right,
+            panels_layout, "Source Folder 2", "right",
+            self.scan_right, self.export_right, self.import_txt_right, self.replicate_right,
             self.browse_right_source
         )
 
@@ -102,7 +93,7 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # Scan mode selection — vertical layout
+        # Scan mode selection — vertical
         scan_mode_layout = QVBoxLayout()
         scan_mode_layout.setSpacing(6)
 
@@ -164,7 +155,7 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
-        # Replicate button — bottom
+        # Replicate button
         replicate_layout = QHBoxLayout()
         replicate_layout.addStretch()
         btn_replicate = QPushButton("Replicate Preview")
@@ -212,15 +203,27 @@ class FolderStructureApp(QMainWindow):
             txt_path = os.path.join(path, "folder_structure.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            QMessageBox.information(self, "Done", f"Saved to:\n{txt_path}")
+
+            # Improved message with Open Folder button
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Export Successful")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Saved to selected source folder")
+            msg.setInformativeText(f"Location:\n{txt_path}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+
+            msg.exec()
+
+            if msg.clickedButton() == open_btn:
+                self._open_folder(os.path.dirname(txt_path))
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_left(self):
         txt_file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select structure .txt file",
-            "",
+            self, "Select structure .txt file", "",
             "Text files (*.txt);;All files (*.*)"
         )
         if not txt_file:
@@ -240,8 +243,7 @@ class FolderStructureApp(QMainWindow):
             return
 
         dest_folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select folder where you want to create the structure"
+            self, "Select folder where you want to create the structure"
         )
         if not dest_folder:
             return
@@ -285,15 +287,27 @@ class FolderStructureApp(QMainWindow):
             txt_path = os.path.join(path, "folder_structure.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            QMessageBox.information(self, "Done", f"Saved to:\n{txt_path}")
+
+            # Same improved message as left side
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Export Successful")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Saved to selected source folder")
+            msg.setInformativeText(f"Location:\n{txt_path}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+
+            msg.exec()
+
+            if msg.clickedButton() == open_btn:
+                self._open_folder(os.path.dirname(txt_path))
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_right(self):
         txt_file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select structure .txt file",
-            "",
+            self, "Select structure .txt file", "",
             "Text files (*.txt);;All files (*.*)"
         )
         if not txt_file:
@@ -313,8 +327,7 @@ class FolderStructureApp(QMainWindow):
             return
 
         dest_folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select folder where you want to create the structure"
+            self, "Select folder where you want to create the structure"
         )
         if not dest_folder:
             return
@@ -329,7 +342,16 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # ── Core creation logic ────────────────────────────
+    # ── Helpers ────────────────────────────────────────
+    def _open_folder(self, path):
+        """Open the folder in the system's file explorer"""
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":  # macOS
+            subprocess.Popen(["open", path])
+        else:  # Linux / others
+            subprocess.Popen(["xdg-open", path])
+
     def create_from_lines(self, path, lines):
         stack = [path]
         for line in lines:
