@@ -51,8 +51,6 @@ class FolderStructureApp(QMainWindow):
         panels_layout.setSpacing(16)
         self.main_layout.addLayout(panels_layout, stretch=1)
 
-        self.last_txt_dir = os.getcwd()
-
         # Left panel
         self._setup_panel(
             panels_layout,
@@ -62,8 +60,7 @@ class FolderStructureApp(QMainWindow):
             self.export_left,
             self.import_txt_left,
             self.replicate_left,
-            self.browse_left_source,
-            self.browse_left_dest
+            self.browse_left_source
         )
 
         # Right panel
@@ -75,12 +72,11 @@ class FolderStructureApp(QMainWindow):
             self.export_right,
             self.import_txt_right,
             self.replicate_right,
-            self.browse_right_source,
-            self.browse_right_dest
+            self.browse_right_source
         )
 
     def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, replicate_cb,
-                     browse_source_cb, browse_dest_cb):
+                     browse_source_cb):
         layout = QVBoxLayout()
         layout.setSpacing(12)
         parent_layout.addLayout(layout, stretch=1)
@@ -106,7 +102,7 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # Scan mode selection — now one below the other
+        # Scan mode selection — vertical layout
         scan_mode_layout = QVBoxLayout()
         scan_mode_layout.setSpacing(6)
 
@@ -126,17 +122,16 @@ class FolderStructureApp(QMainWindow):
         setattr(self, f"{prefix}_radio_only_root", radio_only_root)
         setattr(self, f"{prefix}_radio_recursive", radio_recursive)
 
-        # Action buttons (Scan + Export + Import TXT)
+        # Action buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
         btn_scan = QPushButton("Scan")
-        btn_scan.clicked.connect(scan_cb)
-
         btn_export = QPushButton("Export TXT")
-        btn_export.clicked.connect(export_cb)
-
         btn_import = QPushButton("Import TXT")
+
+        btn_scan.clicked.connect(scan_cb)
+        btn_export.clicked.connect(export_cb)
         btn_import.clicked.connect(import_cb)
 
         for btn in (btn_scan, btn_export, btn_import):
@@ -169,38 +164,6 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
-        # Import TXT source folder
-        txt_source_layout = QHBoxLayout()
-        txt_source_layout.setSpacing(8)
-        txt_label = QLabel("Import TXT from: (optional)")
-        txt_label.setFixedWidth(170)
-        txt_source_layout.addWidget(txt_label)
-        txt_edit = QLineEdit()
-        txt_edit.setPlaceholderText("Optional — preferred starting folder for .txt files")
-        txt_source_layout.addWidget(txt_edit)
-        btn_txt_browse = QPushButton("Browse")
-        btn_txt_browse.setFixedWidth(90)
-        btn_txt_browse.clicked.connect(lambda: self.browse_txt_source(prefix))
-        txt_source_layout.addWidget(btn_txt_browse)
-        layout.addLayout(txt_source_layout)
-        setattr(self, f"{prefix}_txt_source_edit", txt_edit)
-
-        # Destination
-        dest_layout = QHBoxLayout()
-        dest_layout.setSpacing(8)
-        dest_label = QLabel("Destination:")
-        dest_label.setFixedWidth(70)
-        dest_layout.addWidget(dest_label)
-        dest_edit = QLineEdit()
-        dest_edit.setPlaceholderText("Select folder where you want to replicate the previewed structure")
-        dest_layout.addWidget(dest_edit)
-        btn_dest_browse = QPushButton("Browse")
-        btn_dest_browse.setFixedWidth(90)
-        btn_dest_browse.clicked.connect(browse_dest_cb)
-        dest_layout.addWidget(btn_dest_browse)
-        layout.addLayout(dest_layout)
-        setattr(self, f"{prefix}_dest_edit", dest_edit)
-
         # Replicate button — bottom
         replicate_layout = QHBoxLayout()
         replicate_layout.addStretch()
@@ -220,53 +183,11 @@ class FolderStructureApp(QMainWindow):
         replicate_layout.addWidget(btn_replicate)
         layout.addLayout(replicate_layout)
 
-    # ── Helpers ────────────────────────────────────────
-    def browse_txt_source(self, prefix):
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select preferred TXT folder (optional)",
-            getattr(self, f"{prefix}_txt_source_edit").text() or self.last_txt_dir
-        )
-        if folder:
-            getattr(self, f"{prefix}_txt_source_edit").setText(folder)
-            self.last_txt_dir = folder
-
-    def _load_txt_to_preview(self, prefix):
-        edit = getattr(self, f"{prefix}_txt_source_edit")
-        start_dir = edit.text().strip() or self.last_txt_dir
-
-        txt_file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select folder structure .txt file",
-            start_dir,
-            "Text files (*.txt);;All files (*.*)"
-        )
-        if not txt_file:
-            return False
-
-        try:
-            with open(txt_file, encoding="utf-8") as f:
-                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
-
-            preview = getattr(self, f"{prefix}_preview")
-            preview.setPlainText("\n".join(lines))
-
-            self.last_txt_dir = os.path.dirname(txt_file)
-            return True
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
-            return False
-
     # ── Left Panel Methods ─────────────────────────────
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
             self.left_path_edit.setText(folder)
-
-    def browse_left_dest(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Destination Folder", self.left_dest_edit.text())
-        if folder:
-            self.left_dest_edit.setText(folder)
 
     def scan_left(self):
         path = self.left_path_edit.text().strip()
@@ -296,21 +217,42 @@ class FolderStructureApp(QMainWindow):
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_left(self):
-        self._load_txt_to_preview("left")
+        txt_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select structure .txt file",
+            "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not txt_file:
+            return
+        try:
+            with open(txt_file, encoding="utf-8") as f:
+                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
+            self.left_preview.setPlainText("\n".join(lines))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
     def replicate_left(self):
-        dest = self.left_dest_edit.text().strip()
-        if not dest or not os.path.isdir(dest):
-            QMessageBox.warning(self, "Error", "Please select a valid destination folder.")
-            return
         preview_text = self.left_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
         if not lines:
             QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
             return
+
+        dest_folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder where you want to create the structure"
+        )
+        if not dest_folder:
+            return
+
+        if not os.path.isdir(dest_folder):
+            QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
+            return
+
         try:
-            self.create_from_lines(dest, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated from preview.")
+            self.create_from_lines(dest_folder, lines)
+            QMessageBox.information(self, "Success", "Folder structure replicated.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
@@ -319,11 +261,6 @@ class FolderStructureApp(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
             self.right_path_edit.setText(folder)
-
-    def browse_right_dest(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Destination Folder", self.right_dest_edit.text())
-        if folder:
-            self.right_dest_edit.setText(folder)
 
     def scan_right(self):
         path = self.right_path_edit.text().strip()
@@ -353,21 +290,42 @@ class FolderStructureApp(QMainWindow):
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_right(self):
-        self._load_txt_to_preview("right")
+        txt_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select structure .txt file",
+            "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not txt_file:
+            return
+        try:
+            with open(txt_file, encoding="utf-8") as f:
+                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
+            self.right_preview.setPlainText("\n".join(lines))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
     def replicate_right(self):
-        dest = self.right_dest_edit.text().strip()
-        if not dest or not os.path.isdir(dest):
-            QMessageBox.warning(self, "Error", "Please select a valid destination folder.")
-            return
         preview_text = self.right_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
         if not lines:
             QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
             return
+
+        dest_folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder where you want to create the structure"
+        )
+        if not dest_folder:
+            return
+
+        if not os.path.isdir(dest_folder):
+            QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
+            return
+
         try:
-            self.create_from_lines(dest, lines)
-            QMessageBox.information(self, "Success", "Folder structure replicated from preview.")
+            self.create_from_lines(dest_folder, lines)
+            QMessageBox.information(self, "Success", "Folder structure replicated.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
