@@ -60,7 +60,7 @@ class FolderStructureApp(QMainWindow):
             "left",
             self.scan_left,
             self.export_left,
-            self.import_txt_left,  # renamed method
+            self.import_txt_left,
             self.replicate_left,
             self.browse_left_source,
             self.browse_left_dest
@@ -73,7 +73,7 @@ class FolderStructureApp(QMainWindow):
             "right",
             self.scan_right,
             self.export_right,
-            self.import_txt_right,  # renamed method
+            self.import_txt_right,
             self.replicate_right,
             self.browse_right_source,
             self.browse_right_dest
@@ -106,9 +106,9 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # Scan mode
-        scan_mode_layout = QHBoxLayout()
-        scan_mode_layout.setSpacing(16)
+        # Scan mode selection — now one below the other
+        scan_mode_layout = QVBoxLayout()
+        scan_mode_layout.setSpacing(6)
 
         radio_only_root = QRadioButton("Only direct subfolders (root level)")
         radio_recursive = QRadioButton("All subfolders (recursive scan)")
@@ -120,7 +120,7 @@ class FolderStructureApp(QMainWindow):
 
         scan_mode_layout.addWidget(radio_only_root)
         scan_mode_layout.addWidget(radio_recursive)
-        scan_mode_layout.addStretch()
+
         layout.addLayout(scan_mode_layout)
 
         setattr(self, f"{prefix}_radio_only_root", radio_only_root)
@@ -169,7 +169,7 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
-        # Import TXT source folder (renamed label)
+        # Import TXT source folder
         txt_source_layout = QHBoxLayout()
         txt_source_layout.setSpacing(8)
         txt_label = QLabel("Import TXT from: (optional)")
@@ -201,7 +201,7 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(dest_layout)
         setattr(self, f"{prefix}_dest_edit", dest_edit)
 
-        # Replicate button (bottom)
+        # Replicate button — bottom
         replicate_layout = QHBoxLayout()
         replicate_layout.addStretch()
         btn_replicate = QPushButton("Replicate Preview")
