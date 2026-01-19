@@ -72,9 +72,9 @@ class ComparisonDialog(QDialog):
         doc = self.preview.document()
         cursor = QTextCursor(doc)
 
-        green = QColor("#e6ffe6")  # very light green
-        red = QColor("#ffe6e6")  # very light red
-        gray = QColor("#f0f0f0")  # for empty/missing lines
+        green = QColor("#e6ffe6")
+        red = QColor("#ffe6e6")
+        gray = QColor("#f0f0f0")
 
         for l_line, r_line in zip(left_lines, right_lines):
             if l_line == r_line and l_line.strip():
@@ -83,13 +83,11 @@ class ComparisonDialog(QDialog):
                 cursor.setCharFormat(fmt)
                 cursor.insertText(f"  {l_line.rstrip()}\n")
             else:
-                # Left side
                 fmt = QTextCharFormat()
                 fmt.setBackground(red if l_line.strip() else gray)
                 cursor.setCharFormat(fmt)
                 cursor.insertText(f"L {l_line.rstrip()}\n")
 
-                # Right side
                 fmt = QTextCharFormat()
                 fmt.setBackground(red if r_line.strip() else gray)
                 cursor.setCharFormat(fmt)
@@ -128,32 +126,12 @@ class FolderStructureApp(QMainWindow):
                           self.scan_right, self.export_right, self.import_txt_right,
                           self.browse_right_source)
 
-        # Bottom center controls
+        # Bottom center controls - all in one horizontal row
         bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(20)
-        bottom_layout.setContentsMargins(0, 10, 0, 0)
+        bottom_layout.setSpacing(30)
+        bottom_layout.setContentsMargins(0, 20, 0, 20)
+        bottom_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.main_layout.addLayout(bottom_layout)
-
-        # Compare button (center)
-        btn_compare = QPushButton("Compare Structures")
-        btn_compare.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 10px 30px;
-                min-width: 220px;
-            }
-            QPushButton:hover { background-color: #66BB6A; }
-            QPushButton:pressed { background-color: #388E3C; }
-        """)
-        btn_compare.setFixedHeight(50)
-        btn_compare.clicked.connect(self.compare_previews)
-        bottom_layout.addWidget(btn_compare, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Replicate buttons (left and right of compare)
-        replicate_layout = QHBoxLayout()
-        replicate_layout.setSpacing(40)
 
         btn_rep_left = QPushButton("Replicate Left Preview")
         btn_rep_left.setStyleSheet("""
@@ -166,11 +144,24 @@ class FolderStructureApp(QMainWindow):
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
-        btn_rep_left.setFixedHeight(50)
+        btn_rep_left.setFixedHeight(48)
         btn_rep_left.clicked.connect(self.replicate_left)
-        replicate_layout.addWidget(btn_rep_left)
+        bottom_layout.addWidget(btn_rep_left)
 
-        replicate_layout.addStretch()
+        btn_compare = QPushButton("Compare Structures")
+        btn_compare.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
+            QPushButton:hover { background-color: #66BB6A; }
+            QPushButton:pressed { background-color: #388E3C; }
+        """)
+        btn_compare.setFixedHeight(48)
+        btn_compare.clicked.connect(self.compare_previews)
+        bottom_layout.addWidget(btn_compare)
 
         btn_rep_right = QPushButton("Replicate Right Preview")
         btn_rep_right.setStyleSheet("""
@@ -183,11 +174,9 @@ class FolderStructureApp(QMainWindow):
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
-        btn_rep_right.setFixedHeight(50)
+        btn_rep_right.setFixedHeight(48)
         btn_rep_right.clicked.connect(self.replicate_right)
-        replicate_layout.addWidget(btn_rep_right)
-
-        self.main_layout.addLayout(replicate_layout)
+        bottom_layout.addWidget(btn_rep_right)
 
     def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
         layout = QVBoxLayout()
@@ -249,7 +238,7 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview_label)
 
         preview = QTextEdit()
-        preview.setReadOnly(False)  # ← now editable!
+        preview.setReadOnly(False)
         preview.setFont(QFont("SF Mono", 12))
         preview.setStyleSheet("""
             QTextEdit {
@@ -262,6 +251,61 @@ class FolderStructureApp(QMainWindow):
         """)
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
+
+        # Save edited preview button
+        save_layout = QHBoxLayout()
+        save_layout.addStretch()
+        btn_save = QPushButton("Save Edited Preview")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #555555;
+                color: white;
+                font-weight: bold;
+                min-width: 180px;
+            }
+            QPushButton:hover { background-color: #666666; }
+            QPushButton:pressed { background-color: #444444; }
+        """)
+        btn_save.setFixedHeight(38)
+        btn_save.clicked.connect(lambda: self.save_edited_preview(prefix))
+        save_layout.addWidget(btn_save)
+        layout.addLayout(save_layout)
+
+    # ── New: Save edited preview ───────────────────────────────
+    def save_edited_preview(self, prefix):
+        path_edit = getattr(self, f"{prefix}_path_edit")
+        source_path = path_edit.text().strip()
+
+        if not source_path or not os.path.isdir(source_path):
+            QMessageBox.warning(self, "Error", "Please select a valid source folder first.")
+            return
+
+        preview = getattr(self, f"{prefix}_preview")
+        content = preview.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, "Nothing to save", "The preview is empty.")
+            return
+
+        save_path = os.path.join(source_path, "folder_structure_edited.txt")
+
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(content + "\n")
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Save Successful")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setText("Edited preview saved")
+            msg.setInformativeText(f"Location:\n{save_path}")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+            msg.exec()
+
+            if msg.clickedButton() == open_btn:
+                self._open_folder(os.path.dirname(save_path))
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save:\n{str(e)}")
 
     # ── Compare function ────────────────────────────────────────
     def compare_previews(self):
