@@ -4,14 +4,14 @@ import subprocess
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
-    QMessageBox, QStyleFactory, QRadioButton, QButtonGroup
+    QMessageBox, QStyleFactory, QRadioButton, QButtonGroup,
+    QDialog, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 
 
 def get_folder_structure(root_path, recursive=True):
-    """Return folder structure. If recursive=False, only root-level folders are listed."""
     structure = []
     if not recursive:
         for name in sorted(os.listdir(root_path)):
@@ -32,12 +32,78 @@ def get_folder_structure(root_path, recursive=True):
     return structure
 
 
+class ComparisonDialog(QDialog):
+    def __init__(self, left_lines, right_lines, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Structure Comparison")
+        self.resize(1000, 700)
+
+        layout = QVBoxLayout(self)
+
+        label = QLabel("Comparison: Left vs Right preview")
+        label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(label)
+
+        self.preview = QTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setFont(QFont("SF Mono", 12))
+        self.preview.setStyleSheet("""
+            QTextEdit {
+                background-color: #fafafa;
+                color: #000000;
+                border: 1px solid #c0c0c0;
+                border-radius: 6px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(self.preview, stretch=1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        btn_box.accepted.connect(self.accept)
+        layout.addWidget(btn_box)
+
+        self._compare_and_highlight(left_lines, right_lines)
+
+    def _compare_and_highlight(self, left_lines, right_lines):
+        max_len = max(len(left_lines), len(right_lines))
+        left_lines += [""] * (max_len - len(left_lines))
+        right_lines += [""] * (max_len - len(right_lines))
+
+        doc = self.preview.document()
+        cursor = QTextCursor(doc)
+
+        green = QColor("#e6ffe6")  # very light green
+        red = QColor("#ffe6e6")  # very light red
+        gray = QColor("#f0f0f0")  # for empty/missing lines
+
+        for l_line, r_line in zip(left_lines, right_lines):
+            if l_line == r_line and l_line.strip():
+                fmt = QTextCharFormat()
+                fmt.setBackground(green)
+                cursor.setCharFormat(fmt)
+                cursor.insertText(f"  {l_line.rstrip()}\n")
+            else:
+                # Left side
+                fmt = QTextCharFormat()
+                fmt.setBackground(red if l_line.strip() else gray)
+                cursor.setCharFormat(fmt)
+                cursor.insertText(f"L {l_line.rstrip()}\n")
+
+                # Right side
+                fmt = QTextCharFormat()
+                fmt.setBackground(red if r_line.strip() else gray)
+                cursor.setCharFormat(fmt)
+                cursor.insertText(f"R {r_line.rstrip()}\n\n")
+
+        self.preview.setTextCursor(cursor)
+
+
 class FolderStructureApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Structify - Folder Structure Replicator")
-        self.resize(1440, 620)
-        self.setMinimumSize(QSize(1200, 520))
+        self.resize(1440, 680)
+        self.setMinimumSize(QSize(1200, 580))
 
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
@@ -53,21 +119,77 @@ class FolderStructureApp(QMainWindow):
         self.main_layout.addLayout(panels_layout, stretch=1)
 
         # Left panel
-        self._setup_panel(
-            panels_layout, "Source Folder 1", "left",
-            self.scan_left, self.export_left, self.import_txt_left, self.replicate_left,
-            self.browse_left_source
-        )
+        self._setup_panel(panels_layout, "Source Folder 1", "left",
+                          self.scan_left, self.export_left, self.import_txt_left,
+                          self.browse_left_source)
 
         # Right panel
-        self._setup_panel(
-            panels_layout, "Source Folder 2", "right",
-            self.scan_right, self.export_right, self.import_txt_right, self.replicate_right,
-            self.browse_right_source
-        )
+        self._setup_panel(panels_layout, "Source Folder 2", "right",
+                          self.scan_right, self.export_right, self.import_txt_right,
+                          self.browse_right_source)
 
-    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, replicate_cb,
-                     browse_source_cb):
+        # Bottom center controls
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(20)
+        bottom_layout.setContentsMargins(0, 10, 0, 0)
+        self.main_layout.addLayout(bottom_layout)
+
+        # Compare button (center)
+        btn_compare = QPushButton("Compare Structures")
+        btn_compare.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 30px;
+                min-width: 220px;
+            }
+            QPushButton:hover { background-color: #66BB6A; }
+            QPushButton:pressed { background-color: #388E3C; }
+        """)
+        btn_compare.setFixedHeight(50)
+        btn_compare.clicked.connect(self.compare_previews)
+        bottom_layout.addWidget(btn_compare, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Replicate buttons (left and right of compare)
+        replicate_layout = QHBoxLayout()
+        replicate_layout.setSpacing(40)
+
+        btn_rep_left = QPushButton("Replicate Left Preview")
+        btn_rep_left.setStyleSheet("""
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
+            QPushButton:hover { background-color: #0077e6; }
+            QPushButton:pressed { background-color: #0055b3; }
+        """)
+        btn_rep_left.setFixedHeight(50)
+        btn_rep_left.clicked.connect(self.replicate_left)
+        replicate_layout.addWidget(btn_rep_left)
+
+        replicate_layout.addStretch()
+
+        btn_rep_right = QPushButton("Replicate Right Preview")
+        btn_rep_right.setStyleSheet("""
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
+            QPushButton:hover { background-color: #0077e6; }
+            QPushButton:pressed { background-color: #0055b3; }
+        """)
+        btn_rep_right.setFixedHeight(50)
+        btn_rep_right.clicked.connect(self.replicate_right)
+        replicate_layout.addWidget(btn_rep_right)
+
+        self.main_layout.addLayout(replicate_layout)
+
+    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
         layout = QVBoxLayout()
         layout.setSpacing(12)
         parent_layout.addLayout(layout, stretch=1)
@@ -76,7 +198,6 @@ class FolderStructureApp(QMainWindow):
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
 
-        # Source path
         path_layout = QHBoxLayout()
         path_layout.setSpacing(8)
         path_label = QLabel("Source:")
@@ -93,55 +214,42 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # Scan mode selection — vertical
         scan_mode_layout = QVBoxLayout()
         scan_mode_layout.setSpacing(6)
-
         radio_only_root = QRadioButton("Only direct subfolders (root level)")
         radio_recursive = QRadioButton("All subfolders (recursive scan)")
         radio_recursive.setChecked(True)
-
         group = QButtonGroup(self)
         group.addButton(radio_only_root)
         group.addButton(radio_recursive)
-
         scan_mode_layout.addWidget(radio_only_root)
         scan_mode_layout.addWidget(radio_recursive)
-
         layout.addLayout(scan_mode_layout)
-
         setattr(self, f"{prefix}_radio_only_root", radio_only_root)
         setattr(self, f"{prefix}_radio_recursive", radio_recursive)
 
-        # Action buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
-
         btn_scan = QPushButton("Scan")
         btn_export = QPushButton("Export TXT")
         btn_import = QPushButton("Import TXT")
-
         btn_scan.clicked.connect(scan_cb)
         btn_export.clicked.connect(export_cb)
         btn_import.clicked.connect(import_cb)
-
         for btn in (btn_scan, btn_export, btn_import):
             btn.setFixedHeight(36)
             btn_layout.addWidget(btn)
-
         layout.addLayout(btn_layout)
-
         setattr(self, f"{prefix}_btn_scan", btn_scan)
         setattr(self, f"{prefix}_btn_export", btn_export)
         setattr(self, f"{prefix}_btn_import", btn_import)
 
-        # Preview
-        preview_label = QLabel("Structure Preview")
+        preview_label = QLabel("Structure Preview (editable)")
         preview_label.setStyleSheet("font-weight: bold; font-size: 13px;")
         layout.addWidget(preview_label)
 
         preview = QTextEdit()
-        preview.setReadOnly(True)
+        preview.setReadOnly(False)  # ← now editable!
         preview.setFont(QFont("SF Mono", 12))
         preview.setStyleSheet("""
             QTextEdit {
@@ -155,26 +263,22 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
-        # Replicate button
-        replicate_layout = QHBoxLayout()
-        replicate_layout.addStretch()
-        btn_replicate = QPushButton("Replicate Preview")
-        btn_replicate.clicked.connect(replicate_cb)
-        btn_replicate.setStyleSheet("""
-            QPushButton {
-                background-color: #0066cc;
-                color: white;
-                font-weight: bold;
-                min-width: 180px;
-            }
-            QPushButton:hover { background-color: #0077e6; }
-            QPushButton:pressed { background-color: #0055b3; }
-        """)
-        btn_replicate.setFixedHeight(40)
-        replicate_layout.addWidget(btn_replicate)
-        layout.addLayout(replicate_layout)
+    # ── Compare function ────────────────────────────────────────
+    def compare_previews(self):
+        left_text = self.left_preview.toPlainText()
+        right_text = self.right_preview.toPlainText()
 
-    # ── Left Panel Methods ─────────────────────────────
+        left_lines = [line.rstrip() for line in left_text.splitlines()]
+        right_lines = [line.rstrip() for line in right_text.splitlines()]
+
+        if not left_lines and not right_lines:
+            QMessageBox.information(self, "Compare", "Both previews are empty.")
+            return
+
+        dialog = ComparisonDialog(left_lines, right_lines, self)
+        dialog.exec()
+
+    # ── Left Panel Methods ──────────────────────────────────────
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
@@ -215,7 +319,6 @@ class FolderStructureApp(QMainWindow):
 
             if msg.clickedButton() == open_btn:
                 self._open_folder(os.path.dirname(txt_path))
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
@@ -264,11 +367,10 @@ class FolderStructureApp(QMainWindow):
 
             if msg.clickedButton() == open_btn:
                 self._open_folder(dest_folder)
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # ── Right Panel Methods ────────────────────────────
+    # ── Right Panel Methods ─────────────────────────────────────
     def browse_right_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
@@ -309,7 +411,6 @@ class FolderStructureApp(QMainWindow):
 
             if msg.clickedButton() == open_btn:
                 self._open_folder(os.path.dirname(txt_path))
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
@@ -358,18 +459,16 @@ class FolderStructureApp(QMainWindow):
 
             if msg.clickedButton() == open_btn:
                 self._open_folder(dest_folder)
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
     # ── Helpers ────────────────────────────────────────
     def _open_folder(self, path):
-        """Open the folder in the system's file explorer"""
         if sys.platform == "win32":
             os.startfile(path)
-        elif sys.platform == "darwin":  # macOS
+        elif sys.platform == "darwin":
             subprocess.Popen(["open", path])
-        else:  # Linux / others
+        else:
             subprocess.Popen(["xdg-open", path])
 
     def create_from_lines(self, path, lines):
