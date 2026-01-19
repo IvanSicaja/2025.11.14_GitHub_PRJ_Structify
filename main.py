@@ -69,11 +69,11 @@ class ComparisonDialog(QDialog):
     def _compare_and_highlight(self, left_lines, right_lines):
         doc = self.preview.document()
         cursor = QTextCursor(doc)
-        cursor.beginEditBlock()   # ← helps with performance & safety
+        cursor.beginEditBlock()
 
         green = QColor("#e6ffe6")
-        red   = QColor("#ffe6e6")
-        gray  = QColor("#f0f0f0")
+        red = QColor("#ffe6e6")
+        gray = QColor("#f0f0f0")
 
         left_by_level = {}
         right_by_level = {}
@@ -102,7 +102,7 @@ class ComparisonDialog(QDialog):
         )
 
         for level in range(max_level + 1):
-            left_names  = left_by_level.get(level, set())
+            left_names = left_by_level.get(level, set())
             right_names = right_by_level.get(level, set())
 
             common = sorted(left_names & right_names)
@@ -166,9 +166,19 @@ class FolderStructureApp(QMainWindow):
         # Bottom controls - all in one horizontal row
         bottom_layout = QHBoxLayout()
         bottom_layout.setSpacing(30)
-        bottom_layout.setContentsMargins(0, 20, 0, 20)
+        bottom_layout.setContentsMargins(0, 20, 0, 0)
         bottom_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addLayout(bottom_layout)
+        self.main_layout.addLayout(bottom_layout, stretch=0)
+
+        btn_save_left = QPushButton("Save Edited Preview")
+        btn_save_left.setStyleSheet("""
+            QPushButton { background-color: #555555; color: white; font-weight: bold; min-width: 220px; }
+            QPushButton:hover { background-color: #666666; }
+            QPushButton:pressed { background-color: #444444; }
+        """)
+        btn_save_left.setFixedHeight(48)
+        btn_save_left.clicked.connect(self.save_left)
+        bottom_layout.addWidget(btn_save_left)
 
         btn_rep_left = QPushButton("Replicate Left Preview")
         btn_rep_left.setStyleSheet("""
@@ -199,6 +209,16 @@ class FolderStructureApp(QMainWindow):
         btn_rep_right.setFixedHeight(48)
         btn_rep_right.clicked.connect(self.replicate_right)
         bottom_layout.addWidget(btn_rep_right)
+
+        btn_save_right = QPushButton("Save Edited Preview")
+        btn_save_right.setStyleSheet("""
+            QPushButton { background-color: #555555; color: white; font-weight: bold; min-width: 220px; }
+            QPushButton:hover { background-color: #666666; }
+            QPushButton:pressed { background-color: #444444; }
+        """)
+        btn_save_right.setFixedHeight(48)
+        btn_save_right.clicked.connect(self.save_right)
+        bottom_layout.addWidget(btn_save_right)
 
         # Load last paths
         self._load_last_paths()
@@ -275,25 +295,6 @@ class FolderStructureApp(QMainWindow):
         """)
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
-
-        # Save button
-        save_layout = QHBoxLayout()
-        save_layout.addStretch()
-        btn_save = QPushButton("Save Edited Preview")
-        btn_save.setStyleSheet("""
-            QPushButton {
-                background-color: #555555;
-                color: white;
-                font-weight: bold;
-                min-width: 180px;
-            }
-            QPushButton:hover { background-color: #666666; }
-            QPushButton:pressed { background-color: #444444; }
-        """)
-        btn_save.setFixedHeight(38)
-        btn_save.clicked.connect(lambda checked=False: save_cb())
-        save_layout.addWidget(btn_save)
-        layout.addLayout(save_layout)
 
     def _load_last_paths(self):
         try:
@@ -462,7 +463,7 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # Right methods (symmetric)
+    # Right methods
     def browse_right_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
