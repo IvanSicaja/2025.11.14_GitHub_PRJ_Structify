@@ -1,6 +1,7 @@
 import sys
 import os
 import subprocess
+import json
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
@@ -9,6 +10,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+
+LAST_PATHS_FILE = "structify_last_paths.json"
 
 
 def get_folder_structure(root_path, recursive=True):
@@ -39,8 +42,7 @@ class ComparisonDialog(QDialog):
         self.resize(1000, 700)
 
         layout = QVBoxLayout(self)
-
-        label = QLabel("Comparison: Left vs Right preview")
+        label = QLabel("Comparison: Left vs Right preview (order-insensitive per level)")
         label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(label)
 
@@ -65,34 +67,69 @@ class ComparisonDialog(QDialog):
         self._compare_and_highlight(left_lines, right_lines)
 
     def _compare_and_highlight(self, left_lines, right_lines):
-        max_len = max(len(left_lines), len(right_lines))
-        left_lines += [""] * (max_len - len(left_lines))
-        right_lines += [""] * (max_len - len(right_lines))
-
         doc = self.preview.document()
         cursor = QTextCursor(doc)
+        cursor.beginEditBlock()   # ← helps with performance & safety
 
         green = QColor("#e6ffe6")
-        red = QColor("#ffe6e6")
-        gray = QColor("#f0f0f0")
+        red   = QColor("#ffe6e6")
+        gray  = QColor("#f0f0f0")
 
-        for l_line, r_line in zip(left_lines, right_lines):
-            if l_line == r_line and l_line.strip():
+        left_by_level = {}
+        right_by_level = {}
+
+        for line in left_lines:
+            indent = len(line) - len(line.lstrip())
+            level = indent // 2
+            name = line.strip()
+            if level not in left_by_level:
+                left_by_level[level] = set()
+            if name:
+                left_by_level[level].add(name)
+
+        for line in right_lines:
+            indent = len(line) - len(line.lstrip())
+            level = indent // 2
+            name = line.strip()
+            if level not in right_by_level:
+                right_by_level[level] = set()
+            if name:
+                right_by_level[level].add(name)
+
+        max_level = max(
+            max(left_by_level.keys(), default=0),
+            max(right_by_level.keys(), default=0)
+        )
+
+        for level in range(max_level + 1):
+            left_names  = left_by_level.get(level, set())
+            right_names = right_by_level.get(level, set())
+
+            common = sorted(left_names & right_names)
+            for name in common:
                 fmt = QTextCharFormat()
                 fmt.setBackground(green)
                 cursor.setCharFormat(fmt)
-                cursor.insertText(f"  {l_line.rstrip()}\n")
-            else:
-                fmt = QTextCharFormat()
-                fmt.setBackground(red if l_line.strip() else gray)
-                cursor.setCharFormat(fmt)
-                cursor.insertText(f"L {l_line.rstrip()}\n")
+                cursor.insertText(f"  {'  ' * level}{name}\n")
 
+            only_left = sorted(left_names - right_names)
+            for name in only_left:
                 fmt = QTextCharFormat()
-                fmt.setBackground(red if r_line.strip() else gray)
+                fmt.setBackground(red)
                 cursor.setCharFormat(fmt)
-                cursor.insertText(f"R {r_line.rstrip()}\n\n")
+                cursor.insertText(f"L {'  ' * level}{name}\n")
 
+            only_right = sorted(right_names - left_names)
+            for name in only_right:
+                fmt = QTextCharFormat()
+                fmt.setBackground(red)
+                cursor.setCharFormat(fmt)
+                cursor.insertText(f"R {'  ' * level}{name}\n")
+
+            if level < max_level:
+                cursor.insertText("\n")
+
+        cursor.endEditBlock()
         self.preview.setTextCursor(cursor)
 
 
@@ -118,15 +155,15 @@ class FolderStructureApp(QMainWindow):
 
         # Left panel
         self._setup_panel(panels_layout, "Source Folder 1", "left",
-                          self.scan_left, self.export_left, self.import_txt_left,
+                          self.scan_left, self.export_left, self.import_txt_left, self.save_left,
                           self.browse_left_source)
 
         # Right panel
         self._setup_panel(panels_layout, "Source Folder 2", "right",
-                          self.scan_right, self.export_right, self.import_txt_right,
+                          self.scan_right, self.export_right, self.import_txt_right, self.save_right,
                           self.browse_right_source)
 
-        # Bottom center controls - all in one horizontal row
+        # Bottom controls - all in one horizontal row
         bottom_layout = QHBoxLayout()
         bottom_layout.setSpacing(30)
         bottom_layout.setContentsMargins(0, 20, 0, 20)
@@ -135,12 +172,7 @@ class FolderStructureApp(QMainWindow):
 
         btn_rep_left = QPushButton("Replicate Left Preview")
         btn_rep_left.setStyleSheet("""
-            QPushButton {
-                background-color: #0066cc;
-                color: white;
-                font-weight: bold;
-                min-width: 220px;
-            }
+            QPushButton { background-color: #0066cc; color: white; font-weight: bold; min-width: 220px; }
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
@@ -150,12 +182,7 @@ class FolderStructureApp(QMainWindow):
 
         btn_compare = QPushButton("Compare Structures")
         btn_compare.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                min-width: 220px;
-            }
+            QPushButton { background-color: #4CAF50; color: white; font-weight: bold; min-width: 220px; }
             QPushButton:hover { background-color: #66BB6A; }
             QPushButton:pressed { background-color: #388E3C; }
         """)
@@ -165,12 +192,7 @@ class FolderStructureApp(QMainWindow):
 
         btn_rep_right = QPushButton("Replicate Right Preview")
         btn_rep_right.setStyleSheet("""
-            QPushButton {
-                background-color: #0066cc;
-                color: white;
-                font-weight: bold;
-                min-width: 220px;
-            }
+            QPushButton { background-color: #0066cc; color: white; font-weight: bold; min-width: 220px; }
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
@@ -178,7 +200,10 @@ class FolderStructureApp(QMainWindow):
         btn_rep_right.clicked.connect(self.replicate_right)
         bottom_layout.addWidget(btn_rep_right)
 
-    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
+        # Load last paths
+        self._load_last_paths()
+
+    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, save_cb, browse_source_cb):
         layout = QVBoxLayout()
         layout.setSpacing(12)
         parent_layout.addLayout(layout, stretch=1)
@@ -194,7 +219,6 @@ class FolderStructureApp(QMainWindow):
         path_layout.addWidget(path_label)
         edit = QLineEdit()
         edit.setPlaceholderText("Select a folder...")
-        edit.setText(os.getcwd())
         path_layout.addWidget(edit)
         btn_browse = QPushButton("Browse")
         btn_browse.setFixedWidth(90)
@@ -252,7 +276,7 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
-        # Save edited preview button
+        # Save button
         save_layout = QHBoxLayout()
         save_layout.addStretch()
         btn_save = QPushButton("Save Edited Preview")
@@ -267,11 +291,34 @@ class FolderStructureApp(QMainWindow):
             QPushButton:pressed { background-color: #444444; }
         """)
         btn_save.setFixedHeight(38)
-        btn_save.clicked.connect(lambda: self.save_edited_preview(prefix))
+        btn_save.clicked.connect(lambda checked=False: save_cb())
         save_layout.addWidget(btn_save)
         layout.addLayout(save_layout)
 
-    # ── New: Save edited preview ───────────────────────────────
+    def _load_last_paths(self):
+        try:
+            if os.path.exists(LAST_PATHS_FILE):
+                with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if "left" in data and os.path.isdir(data["left"]):
+                    self.left_path_edit.setText(data["left"])
+                if "right" in data and os.path.isdir(data["right"]):
+                    self.right_path_edit.setText(data["right"])
+        except:
+            pass
+
+    def closeEvent(self, event):
+        paths = {
+            "left": self.left_path_edit.text().strip(),
+            "right": self.right_path_edit.text().strip()
+        }
+        try:
+            with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
+                json.dump(paths, f, indent=2)
+        except:
+            pass
+        super().closeEvent(event)
+
     def save_edited_preview(self, prefix):
         path_edit = getattr(self, f"{prefix}_path_edit")
         source_path = path_edit.text().strip()
@@ -281,7 +328,7 @@ class FolderStructureApp(QMainWindow):
             return
 
         preview = getattr(self, f"{prefix}_preview")
-        content = preview.toPlainText().strip()
+        content = preview.toPlainText().rstrip()
         if not content:
             QMessageBox.warning(self, "Nothing to save", "The preview is empty.")
             return
@@ -303,11 +350,9 @@ class FolderStructureApp(QMainWindow):
 
             if msg.clickedButton() == open_btn:
                 self._open_folder(os.path.dirname(save_path))
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save:\n{str(e)}")
 
-    # ── Compare function ────────────────────────────────────────
     def compare_previews(self):
         left_text = self.left_preview.toPlainText()
         right_text = self.right_preview.toPlainText()
@@ -322,7 +367,7 @@ class FolderStructureApp(QMainWindow):
         dialog = ComparisonDialog(left_lines, right_lines, self)
         dialog.exec()
 
-    # ── Left Panel Methods ──────────────────────────────────────
+    # Left methods
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
@@ -380,6 +425,9 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
+    def save_left(self):
+        self.save_edited_preview("left")
+
     def replicate_left(self):
         preview_text = self.left_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
@@ -414,7 +462,7 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # ── Right Panel Methods ─────────────────────────────────────
+    # Right methods (symmetric)
     def browse_right_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
@@ -472,6 +520,9 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
+    def save_right(self):
+        self.save_edited_preview("right")
+
     def replicate_right(self):
         preview_text = self.right_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
@@ -506,7 +557,6 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # ── Helpers ────────────────────────────────────────
     def _open_folder(self, path):
         if sys.platform == "win32":
             os.startfile(path)
