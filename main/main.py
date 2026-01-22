@@ -155,34 +155,29 @@ class FolderStructureApp(QMainWindow):
 
         # Left panel
         self._setup_panel(panels_layout, "Source Folder 1", "left",
-                          self.scan_left, self.export_left, self.import_txt_left, self.save_left,
+                          self.scan_left, self.export_left, self.import_txt_left,
                           self.browse_left_source)
 
         # Right panel
         self._setup_panel(panels_layout, "Source Folder 2", "right",
-                          self.scan_right, self.export_right, self.import_txt_right, self.save_right,
+                          self.scan_right, self.export_right, self.import_txt_right,
                           self.browse_right_source)
 
-        # Bottom controls - all in one horizontal row
+        # Bottom controls: only the three main action buttons in one row
         bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(30)
-        bottom_layout.setContentsMargins(0, 20, 0, 0)
+        bottom_layout.setSpacing(40)
+        bottom_layout.setContentsMargins(0, 20, 0, 20)
         bottom_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.main_layout.addLayout(bottom_layout, stretch=0)
-
-        btn_save_left = QPushButton("Save Edited Preview")
-        btn_save_left.setStyleSheet("""
-            QPushButton { background-color: #555555; color: white; font-weight: bold; min-width: 220px; }
-            QPushButton:hover { background-color: #666666; }
-            QPushButton:pressed { background-color: #444444; }
-        """)
-        btn_save_left.setFixedHeight(48)
-        btn_save_left.clicked.connect(self.save_left)
-        bottom_layout.addWidget(btn_save_left)
+        self.main_layout.addLayout(bottom_layout)
 
         btn_rep_left = QPushButton("Replicate Left Preview")
         btn_rep_left.setStyleSheet("""
-            QPushButton { background-color: #0066cc; color: white; font-weight: bold; min-width: 220px; }
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
@@ -192,7 +187,12 @@ class FolderStructureApp(QMainWindow):
 
         btn_compare = QPushButton("Compare Structures")
         btn_compare.setStyleSheet("""
-            QPushButton { background-color: #4CAF50; color: white; font-weight: bold; min-width: 220px; }
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
             QPushButton:hover { background-color: #66BB6A; }
             QPushButton:pressed { background-color: #388E3C; }
         """)
@@ -202,7 +202,12 @@ class FolderStructureApp(QMainWindow):
 
         btn_rep_right = QPushButton("Replicate Right Preview")
         btn_rep_right.setStyleSheet("""
-            QPushButton { background-color: #0066cc; color: white; font-weight: bold; min-width: 220px; }
+            QPushButton {
+                background-color: #0066cc;
+                color: white;
+                font-weight: bold;
+                min-width: 220px;
+            }
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
         """)
@@ -210,20 +215,10 @@ class FolderStructureApp(QMainWindow):
         btn_rep_right.clicked.connect(self.replicate_right)
         bottom_layout.addWidget(btn_rep_right)
 
-        btn_save_right = QPushButton("Save Edited Preview")
-        btn_save_right.setStyleSheet("""
-            QPushButton { background-color: #555555; color: white; font-weight: bold; min-width: 220px; }
-            QPushButton:hover { background-color: #666666; }
-            QPushButton:pressed { background-color: #444444; }
-        """)
-        btn_save_right.setFixedHeight(48)
-        btn_save_right.clicked.connect(self.save_right)
-        bottom_layout.addWidget(btn_save_right)
-
-        # Load last paths
+        # Load last used source paths
         self._load_last_paths()
 
-    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, save_cb, browse_source_cb):
+    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
         layout = QVBoxLayout()
         layout.setSpacing(12)
         parent_layout.addLayout(layout, stretch=1)
@@ -264,7 +259,7 @@ class FolderStructureApp(QMainWindow):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
         btn_scan = QPushButton("Scan")
-        btn_export = QPushButton("Export TXT")
+        btn_export = QPushButton("Export Previewed TXT")  # ← updated name
         btn_import = QPushButton("Import TXT")
         btn_scan.clicked.connect(scan_cb)
         btn_export.clicked.connect(export_cb)
@@ -320,51 +315,14 @@ class FolderStructureApp(QMainWindow):
             pass
         super().closeEvent(event)
 
-    def save_edited_preview(self, prefix):
-        path_edit = getattr(self, f"{prefix}_path_edit")
-        source_path = path_edit.text().strip()
-
-        if not source_path or not os.path.isdir(source_path):
-            QMessageBox.warning(self, "Error", "Please select a valid source folder first.")
-            return
-
-        preview = getattr(self, f"{prefix}_preview")
-        content = preview.toPlainText().rstrip()
-        if not content:
-            QMessageBox.warning(self, "Nothing to save", "The preview is empty.")
-            return
-
-        save_path = os.path.join(source_path, "folder_structure_edited.txt")
-
-        try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(content + "\n")
-
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Save Successful")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Edited preview saved")
-            msg.setInformativeText(f"Location:\n{save_path}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-            msg.exec()
-
-            if msg.clickedButton() == open_btn:
-                self._open_folder(os.path.dirname(save_path))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save:\n{str(e)}")
-
     def compare_previews(self):
         left_text = self.left_preview.toPlainText()
         right_text = self.right_preview.toPlainText()
-
         left_lines = [line.rstrip() for line in left_text.splitlines()]
         right_lines = [line.rstrip() for line in right_text.splitlines()]
-
         if not left_lines and not right_lines:
             QMessageBox.information(self, "Compare", "Both previews are empty.")
             return
-
         dialog = ComparisonDialog(left_lines, right_lines, self)
         dialog.exec()
 
@@ -391,17 +349,22 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-        recursive = self.left_radio_recursive.isChecked()
+
+        # ← Changed: export current preview content, not re-scan
+        content = self.left_preview.toPlainText().rstrip()
+        if not content:
+            QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
+            return
+
+        txt_path = os.path.join(path, "folder_structure.txt")
         try:
-            lines = get_folder_structure(path, recursive)
-            txt_path = os.path.join(path, "folder_structure.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
+                f.write(content + "\n")
 
             msg = QMessageBox(self)
             msg.setWindowTitle("Export Successful")
             msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Saved to selected source folder")
+            msg.setText("Current preview exported")
             msg.setInformativeText(f"Location:\n{txt_path}")
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
@@ -426,29 +389,22 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
-    def save_left(self):
-        self.save_edited_preview("left")
-
     def replicate_left(self):
         preview_text = self.left_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
         if not lines:
             QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
             return
-
         dest_folder = QFileDialog.getExistingDirectory(
             self, "Select folder where you want to create the structure"
         )
         if not dest_folder:
             return
-
         if not os.path.isdir(dest_folder):
             QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
             return
-
         try:
             self.create_from_lines(dest_folder, lines)
-
             msg = QMessageBox(self)
             msg.setWindowTitle("Replication Successful")
             msg.setIcon(QMessageBox.Icon.Information)
@@ -457,13 +413,12 @@ class FolderStructureApp(QMainWindow):
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
             msg.exec()
-
             if msg.clickedButton() == open_btn:
                 self._open_folder(dest_folder)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # Right methods
+    # Right methods (symmetric)
     def browse_right_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
@@ -486,17 +441,22 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-        recursive = self.right_radio_recursive.isChecked()
+
+        # ← Changed: export current preview content
+        content = self.right_preview.toPlainText().rstrip()
+        if not content:
+            QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
+            return
+
+        txt_path = os.path.join(path, "folder_structure.txt")
         try:
-            lines = get_folder_structure(path, recursive)
-            txt_path = os.path.join(path, "folder_structure.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
+                f.write(content + "\n")
 
             msg = QMessageBox(self)
             msg.setWindowTitle("Export Successful")
             msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Saved to selected source folder")
+            msg.setText("Current preview exported")
             msg.setInformativeText(f"Location:\n{txt_path}")
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
@@ -521,29 +481,22 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
-    def save_right(self):
-        self.save_edited_preview("right")
-
     def replicate_right(self):
         preview_text = self.right_preview.toPlainText()
         lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
         if not lines:
             QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
             return
-
         dest_folder = QFileDialog.getExistingDirectory(
             self, "Select folder where you want to create the structure"
         )
         if not dest_folder:
             return
-
         if not os.path.isdir(dest_folder):
             QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
             return
-
         try:
             self.create_from_lines(dest_folder, lines)
-
             msg = QMessageBox(self)
             msg.setWindowTitle("Replication Successful")
             msg.setIcon(QMessageBox.Icon.Information)
@@ -552,7 +505,6 @@ class FolderStructureApp(QMainWindow):
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
             msg.exec()
-
             if msg.clickedButton() == open_btn:
                 self._open_folder(dest_folder)
         except Exception as e:
