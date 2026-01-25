@@ -259,7 +259,7 @@ class FolderStructureApp(QMainWindow):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
         btn_scan = QPushButton("Scan")
-        btn_export = QPushButton("Export Previewed TXT")  # ← updated name
+        btn_export = QPushButton("Export Previewed TXT")
         btn_import = QPushButton("Import TXT")
         btn_scan.clicked.connect(scan_cb)
         btn_export.clicked.connect(export_cb)
@@ -326,7 +326,100 @@ class FolderStructureApp(QMainWindow):
         dialog = ComparisonDialog(left_lines, right_lines, self)
         dialog.exec()
 
-    # Left methods
+    # ── Export with overwrite protection ────────────────────────────────
+    def _safe_export(self, source_path, content):
+        if not content.strip():
+            QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
+            return
+
+        base_name = "folder_structure.txt"
+        txt_path = os.path.join(source_path, base_name)
+
+        # If file doesn't exist → save directly
+        if not os.path.exists(txt_path):
+            try:
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(content + "\n")
+                self._show_export_success(txt_path)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+            return
+
+        # File exists → ask user
+        msg = QMessageBox(self)
+        msg.setWindowTitle("File Already Exists")
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setText(f"The file already exists:\n{txt_path}")
+        msg.setInformativeText("What would you like to do?")
+
+        overwrite_btn = msg.addButton("Overwrite", QMessageBox.ButtonRole.YesRole)
+        newfile_btn = msg.addButton("Create numbered copy", QMessageBox.ButtonRole.NoRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+
+        msg.exec()
+
+        clicked = msg.clickedButton()
+
+        if clicked == overwrite_btn:
+            try:
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(content + "\n")
+                self._show_export_success(txt_path)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Overwrite failed:\n{str(e)}")
+
+        elif clicked == newfile_btn:
+            # Find next available number
+            i = 1
+            while True:
+                new_name = f"folder_structure ({i}).txt"
+                new_path = os.path.join(source_path, new_name)
+                if not os.path.exists(new_path):
+                    try:
+                        with open(new_path, "w", encoding="utf-8") as f:
+                            f.write(content + "\n")
+                        self._show_export_success(new_path)
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Save failed:\n{str(e)}")
+                    break
+                i += 1
+
+        # else: cancel → do nothing
+
+    def _show_export_success(self, txt_path):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Export Successful")
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setText("Current preview exported")
+        msg.setInformativeText(f"Location:\n{txt_path}")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+        msg.exec()
+
+        if msg.clickedButton() == open_btn:
+            self._open_folder(os.path.dirname(txt_path))
+
+    # Left export
+    def export_left(self):
+        path = self.left_path_edit.text().strip()
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "Error", "Invalid source folder.")
+            return
+
+        content = self.left_preview.toPlainText().rstrip()
+        self._safe_export(path, content)
+
+    # Right export
+    def export_right(self):
+        path = self.right_path_edit.text().strip()
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "Error", "Invalid source folder.")
+            return
+
+        content = self.right_preview.toPlainText().rstrip()
+        self._safe_export(path, content)
+
+    # ── Other methods unchanged ─────────────────────────────────────────
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
@@ -343,37 +436,6 @@ class FolderStructureApp(QMainWindow):
             self.left_preview.setPlainText("\n".join(lines))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
-
-    def export_left(self):
-        path = self.left_path_edit.text().strip()
-        if not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Invalid source folder.")
-            return
-
-        # ← Changed: export current preview content, not re-scan
-        content = self.left_preview.toPlainText().rstrip()
-        if not content:
-            QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
-            return
-
-        txt_path = os.path.join(path, "folder_structure.txt")
-        try:
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(content + "\n")
-
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Export Successful")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Current preview exported")
-            msg.setInformativeText(f"Location:\n{txt_path}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-            msg.exec()
-
-            if msg.clickedButton() == open_btn:
-                self._open_folder(os.path.dirname(txt_path))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_left(self):
         txt_file, _ = QFileDialog.getOpenFileName(
@@ -418,7 +480,6 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    # Right methods (symmetric)
     def browse_right_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
         if folder:
@@ -435,37 +496,6 @@ class FolderStructureApp(QMainWindow):
             self.right_preview.setPlainText("\n".join(lines))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
-
-    def export_right(self):
-        path = self.right_path_edit.text().strip()
-        if not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Invalid source folder.")
-            return
-
-        # ← Changed: export current preview content
-        content = self.right_preview.toPlainText().rstrip()
-        if not content:
-            QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
-            return
-
-        txt_path = os.path.join(path, "folder_structure.txt")
-        try:
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(content + "\n")
-
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Export Successful")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Current preview exported")
-            msg.setInformativeText(f"Location:\n{txt_path}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-            msg.exec()
-
-            if msg.clickedButton() == open_btn:
-                self._open_folder(os.path.dirname(txt_path))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def import_txt_right(self):
         txt_file, _ = QFileDialog.getOpenFileName(
@@ -529,6 +559,30 @@ class FolderStructureApp(QMainWindow):
             current = os.path.join(stack[-1], name)
             os.makedirs(current, exist_ok=True)
             stack.append(current)
+
+    def _load_last_paths(self):
+        try:
+            if os.path.exists(LAST_PATHS_FILE):
+                with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if "left" in data and os.path.isdir(data["left"]):
+                    self.left_path_edit.setText(data["left"])
+                if "right" in data and os.path.isdir(data["right"]):
+                    self.right_path_edit.setText(data["right"])
+        except:
+            pass
+
+    def closeEvent(self, event):
+        paths = {
+            "left": self.left_path_edit.text().strip(),
+            "right": self.right_path_edit.text().strip()
+        }
+        try:
+            with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
+                json.dump(paths, f, indent=2)
+        except:
+            pass
+        super().closeEvent(event)
 
 
 def main():
