@@ -2,6 +2,7 @@ import sys
 import os
 import subprocess
 import json
+from datetime import date
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
@@ -326,13 +327,21 @@ class FolderStructureApp(QMainWindow):
         dialog = ComparisonDialog(left_lines, right_lines, self)
         dialog.exec()
 
-    # ── Export with overwrite protection ────────────────────────────────
+    # ── Safe export with date + folder name + overwrite/number protection ───
     def _safe_export(self, source_path, content):
         if not content.strip():
             QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
             return
 
-        base_name = "folder_structure.txt"
+        # Get current date
+        today = date.today().strftime("%Y.%m.%d")
+
+        # Sanitize folder name (replace invalid chars)
+        folder_name = os.path.basename(source_path)
+        safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in folder_name).strip("_")
+
+        # Base filename
+        base_name = f"{today}_folder-structure_{safe_name}.txt"
         txt_path = os.path.join(source_path, base_name)
 
         # If file doesn't exist → save directly
@@ -369,10 +378,11 @@ class FolderStructureApp(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Overwrite failed:\n{str(e)}")
 
         elif clicked == newfile_btn:
-            # Find next available number
+            # Find next available number: _01, _02, ...
             i = 1
             while True:
-                new_name = f"folder_structure ({i}).txt"
+                suffix = f"_{i:02d}"
+                new_name = f"{today}_folder-structure_{safe_name}{suffix}.txt"
                 new_path = os.path.join(source_path, new_name)
                 if not os.path.exists(new_path):
                     try:
@@ -405,7 +415,6 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-
         content = self.left_preview.toPlainText().rstrip()
         self._safe_export(path, content)
 
@@ -415,11 +424,10 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-
         content = self.right_preview.toPlainText().rstrip()
         self._safe_export(path, content)
 
-    # ── Other methods unchanged ─────────────────────────────────────────
+    # ── All other methods remain completely unchanged ──────────────────────
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
