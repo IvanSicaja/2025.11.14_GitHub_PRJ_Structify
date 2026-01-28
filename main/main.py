@@ -216,6 +216,21 @@ class FolderStructureApp(QMainWindow):
         btn_rep_right.clicked.connect(self.replicate_right)
         bottom_layout.addWidget(btn_rep_right)
 
+        # Professional copyright notice at the very bottom
+        copyright_layout = QHBoxLayout()
+        copyright_layout.setContentsMargins(0, 10, 0, 10)
+        copyright_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        copyright_label = QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
+        copyright_label.setStyleSheet("""
+            color: #666666;
+            font-size: 12px;
+            font-style: italic;
+        """)
+        copyright_layout.addWidget(copyright_label)
+
+        self.main_layout.addLayout(copyright_layout)
+
         # Load last used source paths
         self._load_last_paths()
 
@@ -327,24 +342,17 @@ class FolderStructureApp(QMainWindow):
         dialog = ComparisonDialog(left_lines, right_lines, self)
         dialog.exec()
 
-    # ── Safe export with date + folder name + overwrite/number protection ───
     def _safe_export(self, source_path, content):
         if not content.strip():
             QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
             return
 
-        # Get current date
         today = date.today().strftime("%Y.%m.%d")
-
-        # Sanitize folder name (replace invalid chars)
         folder_name = os.path.basename(source_path)
         safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in folder_name).strip("_")
-
-        # Base filename
         base_name = f"{today}_folder-structure_{safe_name}.txt"
         txt_path = os.path.join(source_path, base_name)
 
-        # If file doesn't exist → save directly
         if not os.path.exists(txt_path):
             try:
                 with open(txt_path, "w", encoding="utf-8") as f:
@@ -354,7 +362,6 @@ class FolderStructureApp(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
             return
 
-        # File exists → ask user
         msg = QMessageBox(self)
         msg.setWindowTitle("File Already Exists")
         msg.setIcon(QMessageBox.Icon.Question)
@@ -378,7 +385,6 @@ class FolderStructureApp(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Overwrite failed:\n{str(e)}")
 
         elif clicked == newfile_btn:
-            # Find next available number: _01, _02, ...
             i = 1
             while True:
                 suffix = f"_{i:02d}"
@@ -394,8 +400,6 @@ class FolderStructureApp(QMainWindow):
                     break
                 i += 1
 
-        # else: cancel → do nothing
-
     def _show_export_success(self, txt_path):
         msg = QMessageBox(self)
         msg.setWindowTitle("Export Successful")
@@ -409,7 +413,6 @@ class FolderStructureApp(QMainWindow):
         if msg.clickedButton() == open_btn:
             self._open_folder(os.path.dirname(txt_path))
 
-    # Left export
     def export_left(self):
         path = self.left_path_edit.text().strip()
         if not os.path.isdir(path):
@@ -418,7 +421,6 @@ class FolderStructureApp(QMainWindow):
         content = self.left_preview.toPlainText().rstrip()
         self._safe_export(path, content)
 
-    # Right export
     def export_right(self):
         path = self.right_path_edit.text().strip()
         if not os.path.isdir(path):
@@ -427,7 +429,7 @@ class FolderStructureApp(QMainWindow):
         content = self.right_preview.toPlainText().rstrip()
         self._safe_export(path, content)
 
-    # ── All other methods remain completely unchanged ──────────────────────
+    # ── All other methods unchanged ────────────────────────────────────────
     def browse_left_source(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
         if folder:
