@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog,
     QMessageBox, QStyleFactory, QRadioButton, QButtonGroup,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QCheckBox, QFrame
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
@@ -15,24 +15,44 @@ from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
 LAST_PATHS_FILE = "structify_last_paths.json"
 
 
-def get_folder_structure(root_path, recursive=True):
+def get_folder_structure(root_path, recursive=True, include_folders=True, include_files=True):
     structure = []
+
     if not recursive:
-        for name in sorted(os.listdir(root_path)):
+        try:
+            entries = sorted(os.listdir(root_path))
+        except PermissionError:
+            return structure
+        for name in entries:
             full_path = os.path.join(root_path, name)
-            if os.path.isdir(full_path):
+            if os.path.isdir(full_path) and include_folders:
+                structure.append(name)
+            elif os.path.isfile(full_path) and include_files:
                 structure.append(name)
         return structure
 
-    for dirpath, dirnames, _ in os.walk(root_path, topdown=True):
+    for dirpath, dirnames, filenames in os.walk(root_path, topdown=True):
         dirnames.sort()
         rel_path = os.path.relpath(dirpath, root_path)
         if rel_path == '.':
-            continue
-        depth = rel_path.count(os.sep)
-        indent = '  ' * depth
-        folder_name = os.path.basename(dirpath)
-        structure.append(f"{indent}{folder_name}")
+            depth = 0
+        else:
+            depth = rel_path.count(os.sep) + 1
+
+        indent = '  ' * (depth - 1) if depth > 0 else ''
+
+        if rel_path != '.':
+            folder_name = os.path.basename(dirpath)
+            if include_folders:
+                structure.append(f"{indent}{folder_name}")
+            child_indent = '  ' * depth
+        else:
+            child_indent = ''
+
+        if include_files:
+            for fname in sorted(filenames):
+                structure.append(f"{child_indent}{fname}")
+
     return structure
 
 
@@ -74,7 +94,6 @@ class ComparisonDialog(QDialog):
 
         green = QColor("#e6ffe6")
         red = QColor("#ffe6e6")
-        gray = QColor("#f0f0f0")
 
         left_by_level = {}
         right_by_level = {}
@@ -138,8 +157,8 @@ class FolderStructureApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Structify - Folder Structure Replicator")
-        self.resize(1440, 680)
-        self.setMinimumSize(QSize(1200, 580))
+        self.resize(1440, 780)
+        self.setMinimumSize(QSize(1200, 680))
 
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
@@ -164,85 +183,130 @@ class FolderStructureApp(QMainWindow):
                           self.scan_right, self.export_right, self.import_txt_right,
                           self.browse_right_source)
 
-        # Bottom controls: only the three main action buttons in one row
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(40)
-        bottom_layout.setContentsMargins(0, 20, 0, 20)
-        bottom_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # ── Bottom controls ──────────────────────────────────────────────────
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setSpacing(8)
+        bottom_layout.setContentsMargins(0, 12, 0, 0)
         self.main_layout.addLayout(bottom_layout)
 
+        # Row 1: Replicate + Compare + Replicate
+        row1 = QHBoxLayout()
+        row1.setSpacing(40)
+        row1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addLayout(row1)
+
         btn_rep_left = QPushButton("Replicate Left Preview")
-        btn_rep_left.setStyleSheet("""
+        btn_rep_left.setStyleSheet(self._blue_btn_style())
+        btn_rep_left.setFixedHeight(48)
+        btn_rep_left.clicked.connect(self.replicate_left)
+        row1.addWidget(btn_rep_left)
+
+        btn_compare = QPushButton("Compare Structures")
+        btn_compare.setStyleSheet(self._green_btn_style())
+        btn_compare.setFixedHeight(48)
+        btn_compare.clicked.connect(self.compare_previews)
+        row1.addWidget(btn_compare)
+
+        btn_rep_right = QPushButton("Replicate Right Preview")
+        btn_rep_right.setStyleSheet(self._blue_btn_style())
+        btn_rep_right.setFixedHeight(48)
+        btn_rep_right.clicked.connect(self.replicate_right)
+        row1.addWidget(btn_rep_right)
+
+        # ── Divider ──
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color: #d0d0d0;")
+        bottom_layout.addWidget(divider)
+
+        # Row 2: Batch Rename section
+        rename_label = QLabel("Batch Rename  —  Left preview = current names  |  Right preview = new names  (line-by-line, same order)")
+        rename_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #333;")
+        rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addWidget(rename_label)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(20)
+        row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addLayout(row2)
+
+        # Search-in path field
+        search_path_label = QLabel("Search in folder:")
+        search_path_label.setStyleSheet("font-size: 12px;")
+        row2.addWidget(search_path_label)
+
+        self.rename_search_path_edit = QLineEdit()
+        self.rename_search_path_edit.setPlaceholderText("Leave empty to use Left source folder …")
+        self.rename_search_path_edit.setFixedWidth(360)
+        self.rename_search_path_edit.setFixedHeight(36)
+        row2.addWidget(self.rename_search_path_edit)
+
+        btn_browse_rename = QPushButton("Browse")
+        btn_browse_rename.setFixedHeight(36)
+        btn_browse_rename.setFixedWidth(80)
+        btn_browse_rename.clicked.connect(self.browse_rename_path)
+        row2.addWidget(btn_browse_rename)
+
+        btn_rename = QPushButton("⟳  Rename Items (Left → Right)")
+        btn_rename.setStyleSheet("""
             QPushButton {
-                background-color: #0066cc;
+                background-color: #e65c00;
                 color: white;
                 font-weight: bold;
-                min-width: 220px;
+                font-size: 13px;
+                min-width: 260px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #ff6a00; }
+            QPushButton:pressed { background-color: #c24f00; }
+        """)
+        btn_rename.setFixedHeight(42)
+        btn_rename.clicked.connect(self.batch_rename)
+        row2.addWidget(btn_rename)
+
+        # Copyright
+        copyright_layout = QHBoxLayout()
+        copyright_layout.setContentsMargins(0, 8, 0, 4)
+        copyright_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addLayout(copyright_layout)
+        copyright_label = QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
+        copyright_label.setStyleSheet("color: #666666; font-size: 12px; font-style: italic;")
+        copyright_layout.addWidget(copyright_label)
+
+        self._load_last_paths()
+
+    # ── Style helpers ────────────────────────────────────────────────────────
+    def _blue_btn_style(self):
+        return """
+            QPushButton {
+                background-color: #0066cc; color: white;
+                font-weight: bold; min-width: 220px; border-radius: 6px;
             }
             QPushButton:hover { background-color: #0077e6; }
             QPushButton:pressed { background-color: #0055b3; }
-        """)
-        btn_rep_left.setFixedHeight(48)
-        btn_rep_left.clicked.connect(self.replicate_left)
-        bottom_layout.addWidget(btn_rep_left)
+        """
 
-        btn_compare = QPushButton("Compare Structures")
-        btn_compare.setStyleSheet("""
+    def _green_btn_style(self):
+        return """
             QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                min-width: 220px;
+                background-color: #4CAF50; color: white;
+                font-weight: bold; min-width: 220px; border-radius: 6px;
             }
             QPushButton:hover { background-color: #66BB6A; }
             QPushButton:pressed { background-color: #388E3C; }
-        """)
-        btn_compare.setFixedHeight(48)
-        btn_compare.clicked.connect(self.compare_previews)
-        bottom_layout.addWidget(btn_compare)
+        """
 
-        btn_rep_right = QPushButton("Replicate Right Preview")
-        btn_rep_right.setStyleSheet("""
-            QPushButton {
-                background-color: #0066cc;
-                color: white;
-                font-weight: bold;
-                min-width: 220px;
-            }
-            QPushButton:hover { background-color: #0077e6; }
-            QPushButton:pressed { background-color: #0055b3; }
-        """)
-        btn_rep_right.setFixedHeight(48)
-        btn_rep_right.clicked.connect(self.replicate_right)
-        bottom_layout.addWidget(btn_rep_right)
-
-        # Professional copyright notice at the very bottom
-        copyright_layout = QHBoxLayout()
-        copyright_layout.setContentsMargins(0, 10, 0, 10)
-        copyright_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        copyright_label = QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
-        copyright_label.setStyleSheet("""
-            color: #666666;
-            font-size: 12px;
-            font-style: italic;
-        """)
-        copyright_layout.addWidget(copyright_label)
-
-        self.main_layout.addLayout(copyright_layout)
-
-        # Load last used source paths
-        self._load_last_paths()
-
+    # ── Panel setup ──────────────────────────────────────────────────────────
     def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
         layout = QVBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         parent_layout.addLayout(layout, stretch=1)
 
         title = QLabel(title_text)
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
 
+        # Source path
         path_layout = QHBoxLayout()
         path_layout.setSpacing(8)
         path_label = QLabel("Source:")
@@ -258,20 +322,52 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        scan_mode_layout = QVBoxLayout()
-        scan_mode_layout.setSpacing(6)
-        radio_only_root = QRadioButton("Only direct subfolders (root level)")
-        radio_recursive = QRadioButton("All subfolders (recursive scan)")
+        # ── Scan depth options ──
+        depth_layout = QHBoxLayout()
+        depth_layout.setSpacing(16)
+        radio_only_root = QRadioButton("Only direct children")
+        radio_recursive = QRadioButton("All subfolders (recursive)")
         radio_recursive.setChecked(True)
         group = QButtonGroup(self)
         group.addButton(radio_only_root)
         group.addButton(radio_recursive)
-        scan_mode_layout.addWidget(radio_only_root)
-        scan_mode_layout.addWidget(radio_recursive)
-        layout.addLayout(scan_mode_layout)
+        depth_layout.addWidget(radio_only_root)
+        depth_layout.addWidget(radio_recursive)
+        depth_layout.addStretch()
+        layout.addLayout(depth_layout)
         setattr(self, f"{prefix}_radio_only_root", radio_only_root)
         setattr(self, f"{prefix}_radio_recursive", radio_recursive)
 
+        # ── Scan content options ──
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(16)
+        content_label = QLabel("Scan:")
+        content_label.setStyleSheet("font-size: 12px; color: #444;")
+        content_layout.addWidget(content_label)
+
+        cb_folders = QCheckBox("Folder names")
+        cb_folders.setChecked(True)
+        cb_files = QCheckBox("File names")
+        cb_files.setChecked(False)
+
+        # Keep at least one checked
+        def make_guard(this_cb, other_cb):
+            def guard(state):
+                if not this_cb.isChecked() and not other_cb.isChecked():
+                    this_cb.setChecked(True)
+            return guard
+
+        cb_folders.stateChanged.connect(make_guard(cb_folders, cb_files))
+        cb_files.stateChanged.connect(make_guard(cb_files, cb_folders))
+
+        content_layout.addWidget(cb_folders)
+        content_layout.addWidget(cb_files)
+        content_layout.addStretch()
+        layout.addLayout(content_layout)
+        setattr(self, f"{prefix}_cb_folders", cb_folders)
+        setattr(self, f"{prefix}_cb_files", cb_files)
+
+        # ── Action buttons ──
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
         btn_scan = QPushButton("Scan")
@@ -284,9 +380,6 @@ class FolderStructureApp(QMainWindow):
             btn.setFixedHeight(36)
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
-        setattr(self, f"{prefix}_btn_scan", btn_scan)
-        setattr(self, f"{prefix}_btn_export", btn_export)
-        setattr(self, f"{prefix}_btn_import", btn_import)
 
         preview_label = QLabel("Structure Preview (editable)")
         preview_label.setStyleSheet("font-weight: bold; font-size: 13px;")
@@ -307,6 +400,7 @@ class FolderStructureApp(QMainWindow):
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
+    # ── Persistence ──────────────────────────────────────────────────────────
     def _load_last_paths(self):
         try:
             if os.path.exists(LAST_PATHS_FILE):
@@ -316,7 +410,7 @@ class FolderStructureApp(QMainWindow):
                     self.left_path_edit.setText(data["left"])
                 if "right" in data and os.path.isdir(data["right"]):
                     self.right_path_edit.setText(data["right"])
-        except:
+        except Exception:
             pass
 
     def closeEvent(self, event):
@@ -327,21 +421,50 @@ class FolderStructureApp(QMainWindow):
         try:
             with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
                 json.dump(paths, f, indent=2)
-        except:
+        except Exception:
             pass
         super().closeEvent(event)
 
-    def compare_previews(self):
-        left_text = self.left_preview.toPlainText()
-        right_text = self.right_preview.toPlainText()
-        left_lines = [line.rstrip() for line in left_text.splitlines()]
-        right_lines = [line.rstrip() for line in right_text.splitlines()]
-        if not left_lines and not right_lines:
-            QMessageBox.information(self, "Compare", "Both previews are empty.")
+    # ── Scan ─────────────────────────────────────────────────────────────────
+    def _do_scan(self, prefix):
+        path_edit = getattr(self, f"{prefix}_path_edit")
+        path = path_edit.text().strip()
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "Error", "Selected source path is not a valid folder.")
             return
-        dialog = ComparisonDialog(left_lines, right_lines, self)
-        dialog.exec()
+        recursive = getattr(self, f"{prefix}_radio_recursive").isChecked()
+        include_folders = getattr(self, f"{prefix}_cb_folders").isChecked()
+        include_files = getattr(self, f"{prefix}_cb_files").isChecked()
+        try:
+            lines = get_folder_structure(path, recursive, include_folders, include_files)
+            getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
 
+    def scan_left(self):
+        self._do_scan("left")
+
+    def scan_right(self):
+        self._do_scan("right")
+
+    # ── Browse ───────────────────────────────────────────────────────────────
+    def browse_left_source(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
+        if folder:
+            self.left_path_edit.setText(folder)
+
+    def browse_right_source(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
+        if folder:
+            self.right_path_edit.setText(folder)
+
+    def browse_rename_path(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select folder to search in",
+                                                   self.rename_search_path_edit.text())
+        if folder:
+            self.rename_search_path_edit.setText(folder)
+
+    # ── Import / Export ──────────────────────────────────────────────────────
     def _safe_export(self, source_path, content):
         if not content.strip():
             QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
@@ -367,15 +490,12 @@ class FolderStructureApp(QMainWindow):
         msg.setIcon(QMessageBox.Icon.Question)
         msg.setText(f"The file already exists:\n{txt_path}")
         msg.setInformativeText("What would you like to do?")
-
         overwrite_btn = msg.addButton("Overwrite", QMessageBox.ButtonRole.YesRole)
         newfile_btn = msg.addButton("Create numbered copy", QMessageBox.ButtonRole.NoRole)
-        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-
+        msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         msg.exec()
 
         clicked = msg.clickedButton()
-
         if clicked == overwrite_btn:
             try:
                 with open(txt_path, "w", encoding="utf-8") as f:
@@ -383,13 +503,10 @@ class FolderStructureApp(QMainWindow):
                 self._show_export_success(txt_path)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Overwrite failed:\n{str(e)}")
-
         elif clicked == newfile_btn:
             i = 1
             while True:
-                suffix = f"_{i:02d}"
-                new_name = f"{today}_folder-structure_{safe_name}{suffix}.txt"
-                new_path = os.path.join(source_path, new_name)
+                new_path = os.path.join(source_path, f"{today}_folder-structure_{safe_name}_{i:02d}.txt")
                 if not os.path.exists(new_path):
                     try:
                         with open(new_path, "w", encoding="utf-8") as f:
@@ -409,7 +526,6 @@ class FolderStructureApp(QMainWindow):
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
         msg.exec()
-
         if msg.clickedButton() == open_btn:
             self._open_folder(os.path.dirname(txt_path))
 
@@ -418,122 +534,55 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-        content = self.left_preview.toPlainText().rstrip()
-        self._safe_export(path, content)
+        self._safe_export(path, self.left_preview.toPlainText().rstrip())
 
     def export_right(self):
         path = self.right_path_edit.text().strip()
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Invalid source folder.")
             return
-        content = self.right_preview.toPlainText().rstrip()
-        self._safe_export(path, content)
+        self._safe_export(path, self.right_preview.toPlainText().rstrip())
 
-    # ── All other methods unchanged ────────────────────────────────────────
-    def browse_left_source(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
-        if folder:
-            self.left_path_edit.setText(folder)
-
-    def scan_left(self):
-        path = self.left_path_edit.text().strip()
-        if not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Selected source path is not a valid folder.")
+    def _import_txt(self, prefix):
+        txt_file, _ = QFileDialog.getOpenFileName(
+            self, "Select structure .txt file", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not txt_file:
             return
-        recursive = self.left_radio_recursive.isChecked()
         try:
-            lines = get_folder_structure(path, recursive)
-            self.left_preview.setPlainText("\n".join(lines))
+            with open(txt_file, encoding="utf-8") as f:
+                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
+            getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
     def import_txt_left(self):
-        txt_file, _ = QFileDialog.getOpenFileName(
-            self, "Select structure .txt file", "",
-            "Text files (*.txt);;All files (*.*)"
-        )
-        if not txt_file:
-            return
-        try:
-            with open(txt_file, encoding="utf-8") as f:
-                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
-            self.left_preview.setPlainText("\n".join(lines))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
-
-    def replicate_left(self):
-        preview_text = self.left_preview.toPlainText()
-        lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
-        if not lines:
-            QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
-            return
-        dest_folder = QFileDialog.getExistingDirectory(
-            self, "Select folder where you want to create the structure"
-        )
-        if not dest_folder:
-            return
-        if not os.path.isdir(dest_folder):
-            QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
-            return
-        try:
-            self.create_from_lines(dest_folder, lines)
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Replication Successful")
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setText("Folder structure replicated.")
-            msg.setInformativeText(f"Created in:\n{dest_folder}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-            msg.exec()
-            if msg.clickedButton() == open_btn:
-                self._open_folder(dest_folder)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
-
-    def browse_right_source(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
-        if folder:
-            self.right_path_edit.setText(folder)
-
-    def scan_right(self):
-        path = self.right_path_edit.text().strip()
-        if not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Selected source path is not a valid folder.")
-            return
-        recursive = self.right_radio_recursive.isChecked()
-        try:
-            lines = get_folder_structure(path, recursive)
-            self.right_preview.setPlainText("\n".join(lines))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
+        self._import_txt("left")
 
     def import_txt_right(self):
-        txt_file, _ = QFileDialog.getOpenFileName(
-            self, "Select structure .txt file", "",
-            "Text files (*.txt);;All files (*.*)"
-        )
-        if not txt_file:
-            return
-        try:
-            with open(txt_file, encoding="utf-8") as f:
-                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
-            self.right_preview.setPlainText("\n".join(lines))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
+        self._import_txt("right")
 
-    def replicate_right(self):
-        preview_text = self.right_preview.toPlainText()
-        lines = [line.rstrip() for line in preview_text.splitlines() if line.strip()]
+    # ── Compare ──────────────────────────────────────────────────────────────
+    def compare_previews(self):
+        left_lines = [l.rstrip() for l in self.left_preview.toPlainText().splitlines()]
+        right_lines = [l.rstrip() for l in self.right_preview.toPlainText().splitlines()]
+        if not left_lines and not right_lines:
+            QMessageBox.information(self, "Compare", "Both previews are empty.")
+            return
+        ComparisonDialog(left_lines, right_lines, self).exec()
+
+    # ── Replicate ────────────────────────────────────────────────────────────
+    def _replicate(self, prefix):
+        preview = getattr(self, f"{prefix}_preview")
+        lines = [l.rstrip() for l in preview.toPlainText().splitlines() if l.strip()]
         if not lines:
             QMessageBox.warning(self, "Error", "No structure in preview to replicate.")
             return
         dest_folder = QFileDialog.getExistingDirectory(
             self, "Select folder where you want to create the structure"
         )
-        if not dest_folder:
-            return
-        if not os.path.isdir(dest_folder):
-            QMessageBox.warning(self, "Error", "Selected path is not a valid folder.")
+        if not dest_folder or not os.path.isdir(dest_folder):
             return
         try:
             self.create_from_lines(dest_folder, lines)
@@ -550,6 +599,136 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
+    def replicate_left(self):
+        self._replicate("left")
+
+    def replicate_right(self):
+        self._replicate("right")
+
+    # ── Batch Rename ─────────────────────────────────────────────────────────
+    def batch_rename(self):
+        """
+        For each line pair (left_name, right_name):
+          - Strip indentation to get just the bare name
+          - Recursively search `search_root` for an entry with that name
+          - Rename it to right_name (keeping it in its current parent folder)
+          - Warn if anything is open / locked
+        """
+        left_lines_raw = self.left_preview.toPlainText().splitlines()
+        right_lines_raw = self.right_preview.toPlainText().splitlines()
+
+        left_lines = [l.rstrip() for l in left_lines_raw if l.strip()]
+        right_lines = [l.rstrip() for l in right_lines_raw if l.strip()]
+
+        if not left_lines or not right_lines:
+            QMessageBox.warning(self, "Batch Rename", "Both previews must contain names.")
+            return
+
+        if len(left_lines) != len(right_lines):
+            QMessageBox.warning(
+                self, "Batch Rename",
+                f"Line count mismatch!\nLeft: {len(left_lines)} lines  |  Right: {len(right_lines)} lines\n"
+                "Both previews must have the same number of non-empty lines."
+            )
+            return
+
+        # Determine search root
+        search_root = self.rename_search_path_edit.text().strip()
+        if not search_root:
+            search_root = self.left_path_edit.text().strip()
+        if not os.path.isdir(search_root):
+            QMessageBox.warning(self, "Batch Rename",
+                                 "Please set a valid 'Search in folder' path\n"
+                                 "(or fill in the Left source folder).")
+            return
+
+        # Build rename pairs (only where name actually changes)
+        pairs = []
+        for left_line, right_line in zip(left_lines, right_lines):
+            old_name = left_line.strip()
+            new_name = right_line.strip()
+            if old_name and new_name and old_name != new_name:
+                pairs.append((old_name, new_name))
+
+        if not pairs:
+            QMessageBox.information(self, "Batch Rename", "No differences found — nothing to rename.")
+            return
+
+        # Confirm
+        preview_text = "\n".join(f"  {o}  →  {n}" for o, n in pairs[:20])
+        if len(pairs) > 20:
+            preview_text += f"\n  … and {len(pairs) - 20} more"
+
+        confirm = QMessageBox(self)
+        confirm.setWindowTitle("Confirm Batch Rename")
+        confirm.setIcon(QMessageBox.Icon.Question)
+        confirm.setText(f"About to rename {len(pairs)} item(s) inside:\n{search_root}")
+        confirm.setInformativeText(
+            f"Rename pairs:\n{preview_text}\n\n"
+            "⚠  Make sure no files/folders are open in other programs before proceeding."
+        )
+        confirm.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        if confirm.exec() != QMessageBox.StandardButton.Ok:
+            return
+
+        # Execute renames
+        renamed = []
+        failed = []
+
+        for old_name, new_name in pairs:
+            found = False
+            for dirpath, dirnames, filenames in os.walk(search_root):
+                # Check folders
+                if old_name in dirnames:
+                    old_full = os.path.join(dirpath, old_name)
+                    new_full = os.path.join(dirpath, new_name)
+                    try:
+                        os.rename(old_full, new_full)
+                        renamed.append(f"{old_full}  →  {new_name}")
+                        found = True
+                        # Update dirnames in-place so os.walk follows the renamed folder
+                        idx = dirnames.index(old_name)
+                        dirnames[idx] = new_name
+                    except Exception as e:
+                        failed.append(f"{old_full}: {e}")
+                        found = True
+                    break
+                # Check files
+                if old_name in filenames:
+                    old_full = os.path.join(dirpath, old_name)
+                    new_full = os.path.join(dirpath, new_name)
+                    try:
+                        os.rename(old_full, new_full)
+                        renamed.append(f"{old_full}  →  {new_name}")
+                        found = True
+                    except Exception as e:
+                        failed.append(f"{old_full}: {e}")
+                        found = True
+                    break
+            if not found:
+                failed.append(f'"{old_name}" — not found in {search_root}')
+
+        # Result summary
+        summary_parts = []
+        if renamed:
+            summary_parts.append(f"✅  Renamed {len(renamed)} item(s) successfully.")
+        if failed:
+            detail = "\n".join(failed[:20])
+            if len(failed) > 20:
+                detail += f"\n… and {len(failed) - 20} more"
+            summary_parts.append(f"❌  {len(failed)} error(s):\n{detail}")
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Batch Rename Complete")
+        msg.setIcon(QMessageBox.Icon.Information if not failed else QMessageBox.Icon.Warning)
+        msg.setText("\n\n".join(summary_parts))
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+        msg.exec()
+        if msg.clickedButton() == open_btn:
+            self._open_folder(search_root)
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
     def _open_folder(self, path):
         if sys.platform == "win32":
             os.startfile(path)
@@ -569,30 +748,6 @@ class FolderStructureApp(QMainWindow):
             current = os.path.join(stack[-1], name)
             os.makedirs(current, exist_ok=True)
             stack.append(current)
-
-    def _load_last_paths(self):
-        try:
-            if os.path.exists(LAST_PATHS_FILE):
-                with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if "left" in data and os.path.isdir(data["left"]):
-                    self.left_path_edit.setText(data["left"])
-                if "right" in data and os.path.isdir(data["right"]):
-                    self.right_path_edit.setText(data["right"])
-        except:
-            pass
-
-    def closeEvent(self, event):
-        paths = {
-            "left": self.left_path_edit.text().strip(),
-            "right": self.right_path_edit.text().strip()
-        }
-        try:
-            with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
-                json.dump(paths, f, indent=2)
-        except:
-            pass
-        super().closeEvent(event)
 
 
 def main():
