@@ -225,27 +225,16 @@ class FolderStructureApp(QMainWindow):
         rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(rename_label)
 
+        # Explanation label (replaces the search path row)
+        info_label = QLabel("The search will automatically use the Left source folder as the search location.")
+        info_label.setStyleSheet("font-size: 13px; color: white;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addWidget(info_label)
+
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addLayout(row2)
-
-        # Search-in path field
-        search_path_label = QLabel("Search in folder:")
-        search_path_label.setStyleSheet("font-size: 12px;")
-        row2.addWidget(search_path_label)
-
-        self.rename_search_path_edit = QLineEdit()
-        self.rename_search_path_edit.setPlaceholderText("Leave empty to use Left source folder …")
-        self.rename_search_path_edit.setFixedWidth(360)
-        self.rename_search_path_edit.setFixedHeight(36)
-        row2.addWidget(self.rename_search_path_edit)
-
-        btn_browse_rename = QPushButton("Browse")
-        btn_browse_rename.setFixedHeight(36)
-        btn_browse_rename.setFixedWidth(80)
-        btn_browse_rename.clicked.connect(self.browse_rename_path)
-        row2.addWidget(btn_browse_rename)
 
         btn_rename = QPushButton("⟳  Rename Items (Left → Right)")
         btn_rename.setStyleSheet("""
@@ -458,12 +447,6 @@ class FolderStructureApp(QMainWindow):
         if folder:
             self.right_path_edit.setText(folder)
 
-    def browse_rename_path(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select folder to search in",
-                                                   self.rename_search_path_edit.text())
-        if folder:
-            self.rename_search_path_edit.setText(folder)
-
     # ── Import / Export ──────────────────────────────────────────────────────
     def _safe_export(self, source_path, content):
         if not content.strip():
@@ -632,14 +615,11 @@ class FolderStructureApp(QMainWindow):
             )
             return
 
-        # Determine search root
-        search_root = self.rename_search_path_edit.text().strip()
-        if not search_root:
-            search_root = self.left_path_edit.text().strip()
+        # Determine search root (always use left source folder)
+        search_root = self.left_path_edit.text().strip()
         if not os.path.isdir(search_root):
             QMessageBox.warning(self, "Batch Rename",
-                                 "Please set a valid 'Search in folder' path\n"
-                                 "(or fill in the Left source folder).")
+                                 "Please set a valid Left source folder path.")
             return
 
         # Build rename pairs (only where name actually changes)
