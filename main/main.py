@@ -220,30 +220,41 @@ class FolderStructureApp(QMainWindow):
         bottom_layout.addWidget(divider)
 
         # Row 2: Batch Rename section
-        rename_label = QLabel("Batch Rename  —  Left preview = current names  |  Right preview = new names  (line-by-line, same order)")
+        rename_label = QLabel("Batch Rename")
         rename_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #333;")
         rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(rename_label)
 
-        # Explanation label (replaces the search path row)
-        info_label = QLabel("The search will automatically use the Left source folder as the search location.")
+        info_label = QLabel(
+            "Left preview = current folder names (as they exist on disk)   |   "
+            "Right preview = the final names after renaming   |   "
+            "Names are matched line-by-line in the same order."
+        )
         info_label.setStyleSheet("font-size: 13px; color: white;")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label)
+
+        info_label2 = QLabel(
+            "Clicking the button below will rename all items in the Left source folder "
+            "so that every current name is replaced with the corresponding name from the Right preview."
+        )
+        info_label2.setStyleSheet("font-size: 13px; color: white;")
+        info_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addWidget(info_label2)
 
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addLayout(row2)
 
-        btn_rename = QPushButton("⟳  Rename Items (Left → Right)")
+        btn_rename = QPushButton("⟳  Apply Right Preview Names to Left Source Folder")
         btn_rename.setStyleSheet("""
             QPushButton {
                 background-color: #e65c00;
                 color: white;
                 font-weight: bold;
                 font-size: 13px;
-                min-width: 260px;
+                min-width: 380px;
                 border-radius: 6px;
             }
             QPushButton:hover { background-color: #ff6a00; }
@@ -311,28 +322,24 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # ── Scan depth options ──
-        depth_layout = QHBoxLayout()
-        depth_layout.setSpacing(16)
-        radio_only_root = QRadioButton("Only direct children")
+        # ── Scan options grid (depth + content aligned in one row) ──
+        options_layout = QHBoxLayout()
+        options_layout.setSpacing(24)
+
+        radio_only_root = QRadioButton("Only root items")
         radio_recursive = QRadioButton("All subfolders (recursive)")
-        radio_recursive.setChecked(True)
+        radio_only_root.setChecked(True)
         group = QButtonGroup(self)
         group.addButton(radio_only_root)
         group.addButton(radio_recursive)
-        depth_layout.addWidget(radio_only_root)
-        depth_layout.addWidget(radio_recursive)
-        depth_layout.addStretch()
-        layout.addLayout(depth_layout)
-        setattr(self, f"{prefix}_radio_only_root", radio_only_root)
-        setattr(self, f"{prefix}_radio_recursive", radio_recursive)
+        options_layout.addWidget(radio_only_root)
+        options_layout.addWidget(radio_recursive)
 
-        # ── Scan content options ──
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(16)
-        content_label = QLabel("Scan:")
-        content_label.setStyleSheet("font-size: 12px; color: #444;")
-        content_layout.addWidget(content_label)
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color: #aaaaaa;")
+        options_layout.addWidget(sep)
 
         cb_folders = QCheckBox("Folder names")
         cb_folders.setChecked(True)
@@ -349,10 +356,12 @@ class FolderStructureApp(QMainWindow):
         cb_folders.stateChanged.connect(make_guard(cb_folders, cb_files))
         cb_files.stateChanged.connect(make_guard(cb_files, cb_folders))
 
-        content_layout.addWidget(cb_folders)
-        content_layout.addWidget(cb_files)
-        content_layout.addStretch()
-        layout.addLayout(content_layout)
+        options_layout.addWidget(cb_folders)
+        options_layout.addWidget(cb_files)
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+        setattr(self, f"{prefix}_radio_only_root", radio_only_root)
+        setattr(self, f"{prefix}_radio_recursive", radio_recursive)
         setattr(self, f"{prefix}_cb_folders", cb_folders)
         setattr(self, f"{prefix}_cb_files", cb_files)
 
