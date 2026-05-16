@@ -692,56 +692,110 @@ class FolderStructureApp(QMainWindow):
         if confirm.exec() != QMessageBox.StandardButton.Ok:
             return
 
-        # ── Execute renames in index order ──
-        # Keep a running map of old_abs → new_abs so that if a parent was
-        # already renamed, children paths are adjusted before the rename.
-        renamed_map = {}   # old_abs → new_abs for already-renamed items
+        # ── Execute renames — two-phase to avoid WinError 183 name collisions ──
+        #
+        # Problem: if A→B but B already exists (because B→C is also in ops),
+        # os.rename raises WinError 183 / FileExistsError on Windows.
+        #
+        # Solution:
+        #   Phase 1 — rename every source to a guaranteed-unique temp name
+        #   Phase 2 — rename every temp name to the desired final name
+        #
+        # A running map (old_abs → current_abs) tracks path changes so that
+        # children of renamed parents are resolved correctly throughout.
+
+        import uuid
+
+        current_abs_map = {}   # original old_abs → its current path on disk
 
         def _resolve(path):
-            """If a prefix of `path` was already renamed, update the path."""
-            for old_prefix, new_prefix in renamed_map.items():
+            """Adjust `path` if any of its ancestor paths was already renamed."""
+            for old_prefix, cur_prefix in current_abs_map.items():
                 if path == old_prefix or path.startswith(old_prefix + os.sep):
-                    return new_prefix + path[len(old_prefix):]
+                    return cur_prefix + path[len(old_prefix):]
             return path
 
         renamed = []
         failed = []
+        phase2_ops = []   # (temp_abs, final_abs, old_name, new_name)
 
+        # ── Phase 1: source → temp ──
         for old_abs, new_abs, old_name, new_name in ops:
-            # Adjust paths in case a parent was already renamed
-            old_abs_resolved = _resolve(old_abs)
-            new_abs_resolved = os.path.join(os.path.dirname(old_abs_resolved), new_name)
+            old_resolved = _resolve(old_abs)
+            parent = os.path.dirname(old_resolved)
+            temp_name = f"__structify_tmp_{uuid.uuid4().hex}"
+            temp_abs = os.path.join(parent, temp_name)
 
-            if not os.path.exists(old_abs_resolved):
-                failed.append(f'"{old_name}" — path does not exist:\n  {old_abs_resolved}')
+            if not os.path.exists(old_resolved):
+                failed.append(f'"{old_name}" — path does not exist:\n  {old_resolved}')
                 continue
 
             try:
-                os.rename(old_abs_resolved, new_abs_resolved)
-                renamed.append(f"{old_abs_resolved}  →  {new_name}")
-                renamed_map[old_abs] = new_abs_resolved
+                os.rename(old_resolved, temp_abs)
+                current_abs_map[old_abs] = temp_abs
+                phase2_ops.append((temp_abs, os.path.join(parent, new_name), old_name, new_name))
             except Exception as e:
-                failed.append(f"{old_abs_resolved}: {e}")
+                failed.append(f"{old_resolved}  →  (temp): {e}")
 
-        # ── Result summary ──
-        summary_parts = []
+        # ── Phase 2: temp → final name ──
+        for temp_abs, final_abs, old_name, new_name in phase2_ops:
+            try:
+                os.rename(temp_abs, final_abs)
+                renamed.append(f"{old_name}  →  {new_name}")
+            except Exception as e:
+                failed.append(f"{temp_abs}  →  {new_name}: {e}")
+
+        # ── Result summary — scrollable custom dialog ──
+        summary_lines = []
         if renamed:
-            summary_parts.append(f"✅  Renamed {len(renamed)} item(s) successfully.")
+            summary_lines.append(f"✅  Renamed {len(renamed)} item(s) successfully.\n")
+            for r in renamed:
+                summary_lines.append(f"  {r}")
         if failed:
-            detail = "\n".join(failed[:20])
-            if len(failed) > 20:
-                detail += f"\n… and {len(failed) - 20} more"
-            summary_parts.append(f"❌  {len(failed)} error(s):\n{detail}")
+            if summary_lines:
+                summary_lines.append("")
+            summary_lines.append(f"❌  {len(failed)} error(s):\n")
+            for f_msg in failed:
+                summary_lines.append(f"  {f_msg}")
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Batch Rename Complete")
-        msg.setIcon(QMessageBox.Icon.Information if not failed else QMessageBox.Icon.Warning)
-        msg.setText("\n\n".join(summary_parts))
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-        msg.exec()
-        if msg.clickedButton() == open_btn:
-            self._open_folder(root)
+        full_text = "\n".join(summary_lines)
+
+        result_dlg = QDialog(self)
+        result_dlg.setWindowTitle("Batch Rename Complete")
+        result_dlg.resize(700, 400)
+        dlg_layout = QVBoxLayout(result_dlg)
+        dlg_layout.setContentsMargins(16, 16, 16, 12)
+        dlg_layout.setSpacing(10)
+
+        scroll_edit = QTextEdit()
+        scroll_edit.setReadOnly(True)
+        scroll_edit.setFont(QFont("Courier New", 11))
+        scroll_edit.setPlainText(full_text)
+        dlg_layout.addWidget(scroll_edit, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        copy_btn = QPushButton("Copy to Clipboard")
+        copy_btn.setFixedHeight(34)
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(full_text))
+        btn_row.addWidget(copy_btn)
+
+        btn_row.addStretch()
+
+        open_btn = QPushButton("Open Folder")
+        open_btn.setFixedHeight(34)
+        open_btn.clicked.connect(lambda: self._open_folder(root))
+        btn_row.addWidget(open_btn)
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedHeight(34)
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(result_dlg.accept)
+        btn_row.addWidget(ok_btn)
+
+        dlg_layout.addLayout(btn_row)
+        result_dlg.exec()
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _open_folder(self, path):
