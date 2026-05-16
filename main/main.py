@@ -221,7 +221,7 @@ class FolderStructureApp(QMainWindow):
 
         # Row 2: Batch Rename section
         rename_label = QLabel("Batch Rename")
-        rename_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #333;")
+        rename_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #e0e0e0;")
         rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(rename_label)
 
@@ -230,7 +230,7 @@ class FolderStructureApp(QMainWindow):
             "Right preview = the final names after renaming   |   "
             "Names are matched line-by-line in the same order."
         )
-        info_label.setStyleSheet("font-size: 13px; color: white;")
+        info_label.setStyleSheet("font-size: 13px; color: #e0e0e0;")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label)
 
@@ -238,7 +238,7 @@ class FolderStructureApp(QMainWindow):
             "Clicking the button below will rename all items in the Left source folder "
             "so that every current name is replaced with the corresponding name from the Right preview."
         )
-        info_label2.setStyleSheet("font-size: 13px; color: white;")
+        info_label2.setStyleSheet("font-size: 13px; color: #e0e0e0;")
         info_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label2)
 
