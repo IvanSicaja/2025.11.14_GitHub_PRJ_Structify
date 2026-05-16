@@ -675,21 +675,55 @@ class FolderStructureApp(QMainWindow):
             QMessageBox.information(self, "Batch Rename", "No differences found — nothing to rename.")
             return
 
-        # ── Confirm ──
-        preview_text = "\n".join(f"  {o}  →  {n}" for _, _, o, n in ops[:20])
-        if len(ops) > 20:
-            preview_text += f"\n  … and {len(ops) - 20} more"
+        # ── Confirm — scrollable custom dialog ──
+        confirm_dlg = QDialog(self)
+        confirm_dlg.setWindowTitle("Confirm Batch Rename")
+        confirm_dlg.resize(680, 420)
+        c_layout = QVBoxLayout(confirm_dlg)
+        c_layout.setContentsMargins(16, 16, 16, 12)
+        c_layout.setSpacing(10)
 
-        confirm = QMessageBox(self)
-        confirm.setWindowTitle("Confirm Batch Rename")
-        confirm.setIcon(QMessageBox.Icon.Question)
-        confirm.setText(f"About to rename {len(ops)} item(s) inside:\n{root}")
-        confirm.setInformativeText(
-            f"Rename pairs:\n{preview_text}\n\n"
-            "⚠  Make sure no files/folders are open in other programs before proceeding."
+        c_header = QLabel(f"About to rename <b>{len(ops)}</b> item(s) inside:<br>"
+                          f"<code>{root}</code>")
+        c_header.setWordWrap(True)
+        c_layout.addWidget(c_header)
+
+        c_info = QLabel(
+            "⚠  Make sure no files or folders are open in other programs before proceeding."
         )
-        confirm.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-        if confirm.exec() != QMessageBox.StandardButton.Ok:
+        c_info.setWordWrap(True)
+        c_info.setStyleSheet("color: #cc6600;")
+        c_layout.addWidget(c_info)
+
+        col_label = QLabel(
+            "<b>Current name (left preview)</b>  →  <b>New name (right preview)</b>"
+        )
+        col_label.setStyleSheet("font-size: 12px; color: #555;")
+        c_layout.addWidget(col_label)
+
+        pairs_lines = "\n".join(f"  {o}  →  {n}" for _, _, o, n in ops)
+        c_scroll = QTextEdit()
+        c_scroll.setReadOnly(True)
+        c_scroll.setFont(QFont("Courier New", 11))
+        c_scroll.setPlainText(pairs_lines)
+        c_layout.addWidget(c_scroll, stretch=1)
+
+        c_btn_row = QHBoxLayout()
+        c_btn_row.setSpacing(10)
+        c_btn_row.addStretch()
+        c_cancel = QPushButton("Cancel")
+        c_cancel.setFixedHeight(34)
+        c_cancel.clicked.connect(confirm_dlg.reject)
+        c_btn_row.addWidget(c_cancel)
+        c_ok = QPushButton("Rename")
+        c_ok.setFixedHeight(34)
+        c_ok.setDefault(True)
+        c_ok.setStyleSheet("background-color: #e65c00; color: white; font-weight: bold; border-radius: 4px;")
+        c_ok.clicked.connect(confirm_dlg.accept)
+        c_btn_row.addWidget(c_ok)
+        c_layout.addLayout(c_btn_row)
+
+        if confirm_dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         # ── Execute renames — two-phase to avoid WinError 183 name collisions ──
