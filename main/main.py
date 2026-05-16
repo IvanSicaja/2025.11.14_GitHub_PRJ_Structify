@@ -600,15 +600,27 @@ class FolderStructureApp(QMainWindow):
     # ── Batch Rename ─────────────────────────────────────────────────────────
     def batch_rename(self):
         """
-        For each line pair (left_name, right_name):
-          - Strip indentation to get just the bare name
-          - Recursively search `search_root` for an entry with that name
-          - Rename it to right_name (keeping it in its current parent folder)
-          - Warn if anything is open / locked
+        Strict index-based rename — NO filesystem search whatsoever.
+
+        The LEFT preview encodes the current full path of each item via
+        indentation (2 spaces per depth level), exactly as produced by Scan.
+        The RIGHT preview encodes the desired final name for each item at the
+        same line index.
+
+        For line N:
+          - LEFT line N  → reconstruct the current absolute path using the
+                           indent-based stack (same algorithm as create_from_lines)
+          - RIGHT line N → take only the bare name (.strip()) as the new name
+          - os.rename(old_full_path, parent_of_old / new_name)  — direct, no search
+
+        After a rename the in-memory path stack is updated so that any children
+        of a renamed folder still resolve correctly.
         """
         left_lines_raw = self.left_preview.toPlainText().splitlines()
         right_lines_raw = self.right_preview.toPlainText().splitlines()
 
+        # Keep raw lines (with indentation) for path reconstruction;
+        # filter only truly empty lines so indices stay aligned.
         left_lines = [l.rstrip() for l in left_lines_raw if l.strip()]
         right_lines = [l.rstrip() for l in right_lines_raw if l.strip()]
 
@@ -624,34 +636,54 @@ class FolderStructureApp(QMainWindow):
             )
             return
 
-        # Determine search root (always use left source folder)
-        search_root = self.left_path_edit.text().strip()
-        if not os.path.isdir(search_root):
+        root = self.left_path_edit.text().strip()
+        if not os.path.isdir(root):
             QMessageBox.warning(self, "Batch Rename",
-                                 "Please set a valid Left source folder path.")
+                                "Please set a valid Left source folder path.")
             return
 
-        # Build rename pairs (only where name actually changes)
-        pairs = []
-        for left_line, right_line in zip(left_lines, right_lines):
-            old_name = left_line.strip()
-            new_name = right_line.strip()
-            if old_name and new_name and old_name != new_name:
-                pairs.append((old_name, new_name))
+        # ── Reconstruct absolute paths from indented left preview ──
+        # stack[level] = current absolute path segment at that depth
+        path_stack = [root]   # level 0 = root itself
+        left_abs_paths = []   # one entry per left_line
 
-        if not pairs:
+        for line in left_lines:
+            indent = len(line) - len(line.lstrip())
+            level = indent // 2          # 0 = direct child of root
+            name = line.strip()
+
+            # Trim stack so parent is at path_stack[level]
+            # (level 0 child lives under path_stack[0] = root)
+            while len(path_stack) > level + 1:
+                path_stack.pop()
+
+            abs_path = os.path.join(path_stack[-1], name)
+            left_abs_paths.append(abs_path)
+            path_stack.append(abs_path)   # becomes parent for deeper items
+
+        # ── Build rename operations (only lines where name actually changes) ──
+        ops = []   # list of (old_abs_path, new_abs_path, old_name, new_name)
+        for i, (old_abs, right_line) in enumerate(zip(left_abs_paths, right_lines)):
+            old_name = os.path.basename(old_abs)
+            new_name = right_line.strip()
+            if not new_name or new_name == old_name:
+                continue
+            new_abs = os.path.join(os.path.dirname(old_abs), new_name)
+            ops.append((old_abs, new_abs, old_name, new_name))
+
+        if not ops:
             QMessageBox.information(self, "Batch Rename", "No differences found — nothing to rename.")
             return
 
-        # Confirm
-        preview_text = "\n".join(f"  {o}  →  {n}" for o, n in pairs[:20])
-        if len(pairs) > 20:
-            preview_text += f"\n  … and {len(pairs) - 20} more"
+        # ── Confirm ──
+        preview_text = "\n".join(f"  {o}  →  {n}" for _, _, o, n in ops[:20])
+        if len(ops) > 20:
+            preview_text += f"\n  … and {len(ops) - 20} more"
 
         confirm = QMessageBox(self)
         confirm.setWindowTitle("Confirm Batch Rename")
         confirm.setIcon(QMessageBox.Icon.Question)
-        confirm.setText(f"About to rename {len(pairs)} item(s) inside:\n{search_root}")
+        confirm.setText(f"About to rename {len(ops)} item(s) inside:\n{root}")
         confirm.setInformativeText(
             f"Rename pairs:\n{preview_text}\n\n"
             "⚠  Make sure no files/folders are open in other programs before proceeding."
@@ -660,44 +692,38 @@ class FolderStructureApp(QMainWindow):
         if confirm.exec() != QMessageBox.StandardButton.Ok:
             return
 
-        # Execute renames
+        # ── Execute renames in index order ──
+        # Keep a running map of old_abs → new_abs so that if a parent was
+        # already renamed, children paths are adjusted before the rename.
+        renamed_map = {}   # old_abs → new_abs for already-renamed items
+
+        def _resolve(path):
+            """If a prefix of `path` was already renamed, update the path."""
+            for old_prefix, new_prefix in renamed_map.items():
+                if path == old_prefix or path.startswith(old_prefix + os.sep):
+                    return new_prefix + path[len(old_prefix):]
+            return path
+
         renamed = []
         failed = []
 
-        for old_name, new_name in pairs:
-            found = False
-            for dirpath, dirnames, filenames in os.walk(search_root):
-                # Check folders
-                if old_name in dirnames:
-                    old_full = os.path.join(dirpath, old_name)
-                    new_full = os.path.join(dirpath, new_name)
-                    try:
-                        os.rename(old_full, new_full)
-                        renamed.append(f"{old_full}  →  {new_name}")
-                        found = True
-                        # Update dirnames in-place so os.walk follows the renamed folder
-                        idx = dirnames.index(old_name)
-                        dirnames[idx] = new_name
-                    except Exception as e:
-                        failed.append(f"{old_full}: {e}")
-                        found = True
-                    break
-                # Check files
-                if old_name in filenames:
-                    old_full = os.path.join(dirpath, old_name)
-                    new_full = os.path.join(dirpath, new_name)
-                    try:
-                        os.rename(old_full, new_full)
-                        renamed.append(f"{old_full}  →  {new_name}")
-                        found = True
-                    except Exception as e:
-                        failed.append(f"{old_full}: {e}")
-                        found = True
-                    break
-            if not found:
-                failed.append(f'"{old_name}" — not found in {search_root}')
+        for old_abs, new_abs, old_name, new_name in ops:
+            # Adjust paths in case a parent was already renamed
+            old_abs_resolved = _resolve(old_abs)
+            new_abs_resolved = os.path.join(os.path.dirname(old_abs_resolved), new_name)
 
-        # Result summary
+            if not os.path.exists(old_abs_resolved):
+                failed.append(f'"{old_name}" — path does not exist:\n  {old_abs_resolved}')
+                continue
+
+            try:
+                os.rename(old_abs_resolved, new_abs_resolved)
+                renamed.append(f"{old_abs_resolved}  →  {new_name}")
+                renamed_map[old_abs] = new_abs_resolved
+            except Exception as e:
+                failed.append(f"{old_abs_resolved}: {e}")
+
+        # ── Result summary ──
         summary_parts = []
         if renamed:
             summary_parts.append(f"✅  Renamed {len(renamed)} item(s) successfully.")
@@ -715,7 +741,7 @@ class FolderStructureApp(QMainWindow):
         open_btn = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
         msg.exec()
         if msg.clickedButton() == open_btn:
-            self._open_folder(search_root)
+            self._open_folder(root)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _open_folder(self, path):
