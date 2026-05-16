@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QStyleFactory, QRadioButton, QButtonGroup,
     QDialog, QDialogButtonBox, QCheckBox, QFrame
 )
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+from PyQt6.QtCore import Qt, QSize, QRect
+from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor, QPainter, QPalette
 
 LAST_PATHS_FILE = "structify_last_paths.json"
 
@@ -55,6 +55,117 @@ def get_folder_structure(root_path, recursive=True, include_folders=True, includ
 
     return structure
 
+
+
+class LineNumberArea(QWidget):
+    """Gutter widget that paints line numbers next to a QTextEdit."""
+
+    def __init__(self, editor):
+        super().__init__(editor)
+        self._editor = editor
+
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize as _QSize
+        return _QSize(self._editor._gutter_width(), 0)
+
+    def paintEvent(self, event):
+        self._editor._paint_gutter(event)
+
+
+class LineNumberedEditor(QWidget):
+    """
+    A QTextEdit wrapped in a container that shows a read-only line-number
+    gutter on the left — styled like a professional code editor.
+    The inner QTextEdit is fully editable and accessible via .editor.
+    """
+
+    # Proxy the most-used QTextEdit methods so callers need not change.
+    def setPlainText(self, text):   self.editor.setPlainText(text)
+    def toPlainText(self):          return self.editor.toPlainText()
+    def setReadOnly(self, val):     self.editor.setReadOnly(val)
+    def setFont(self, font):        self.editor.setFont(font)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.editor = QTextEdit(self)
+        self.editor.setFont(QFont("SF Mono", 12))
+        self.editor.setStyleSheet("""
+            QTextEdit {
+                background-color: #ffffff;
+                color: #000000;
+                border: none;
+                padding: 4px 8px;
+            }
+        """)
+
+        self._gutter = LineNumberArea(self)
+        self._gutter.setStyleSheet("")  # painted manually
+
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        h.addWidget(self._gutter)
+        h.addWidget(self.editor)
+
+        # Outer border matches the old QTextEdit style
+        self.setStyleSheet("""
+            LineNumberedEditor {
+                border: 1px solid #d0d4d8;
+                border-radius: 6px;
+                background-color: #ffffff;
+            }
+        """)
+
+        self.editor.document().blockCountChanged.connect(self._update_gutter_width)
+        self.editor.verticalScrollBar().valueChanged.connect(self._gutter.update)
+        self.editor.document().documentLayout().documentSizeChanged.connect(
+            lambda _: self._gutter.update()
+        )
+        self._update_gutter_width()
+
+    def _gutter_width(self):
+        digits = max(2, len(str(self.editor.document().blockCount())))
+        return 12 + self.editor.fontMetrics().horizontalAdvance('9') * digits
+
+    def _update_gutter_width(self):
+        self._gutter.setFixedWidth(self._gutter_width())
+
+    def _paint_gutter(self, event):
+        painter = QPainter(self._gutter)
+        painter.fillRect(event.rect(), QColor("#f0f0f0"))
+
+        block = self.editor.document().begin()
+        block_num = 1
+        editor_top = self.editor.contentsMargins().top()
+
+        # Map document y-coordinates to gutter y-coordinates
+        scroll_y = self.editor.verticalScrollBar().value()
+        doc_layout = self.editor.document().documentLayout()
+
+        while block.isValid():
+            block_rect = doc_layout.blockBoundingRect(block)
+            top = int(block_rect.top()) - scroll_y + editor_top
+
+            if top > event.rect().bottom():
+                break
+
+            bottom = top + int(block_rect.height())
+            if bottom >= event.rect().top():
+                painter.setPen(QColor("#999999"))
+                font = self.editor.font()
+                font.setPointSize(font.pointSize() - 1)
+                painter.setFont(font)
+                painter.drawText(
+                    0, top,
+                    self._gutter.width() - 4, int(block_rect.height()),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    str(block_num)
+                )
+            block = block.next()
+            block_num += 1
+
+        painter.end()
 
 class ComparisonDialog(QDialog):
     def __init__(self, left_lines, right_lines, parent=None):
@@ -383,18 +494,7 @@ class FolderStructureApp(QMainWindow):
         preview_label.setStyleSheet("font-weight: bold; font-size: 13px;")
         layout.addWidget(preview_label)
 
-        preview = QTextEdit()
-        preview.setReadOnly(False)
-        preview.setFont(QFont("SF Mono", 12))
-        preview.setStyleSheet("""
-            QTextEdit {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #d0d4d8;
-                border-radius: 6px;
-                padding: 8px;
-            }
-        """)
+        preview = LineNumberedEditor()
         layout.addWidget(preview, stretch=1)
         setattr(self, f"{prefix}_preview", preview)
 
@@ -713,10 +813,12 @@ class FolderStructureApp(QMainWindow):
         c_btn_row.addStretch()
         c_cancel = QPushButton("Cancel")
         c_cancel.setFixedHeight(34)
+        c_cancel.setFixedWidth(120)
         c_cancel.clicked.connect(confirm_dlg.reject)
         c_btn_row.addWidget(c_cancel)
         c_ok = QPushButton("Rename")
         c_ok.setFixedHeight(34)
+        c_ok.setFixedWidth(120)
         c_ok.setDefault(True)
         c_ok.setStyleSheet("background-color: #e65c00; color: white; font-weight: bold; border-radius: 4px;")
         c_ok.clicked.connect(confirm_dlg.accept)
