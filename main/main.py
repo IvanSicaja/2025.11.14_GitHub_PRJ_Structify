@@ -80,7 +80,20 @@ class LineNumberedEditor(QWidget):
     """
 
     # Proxy the most-used QTextEdit methods so callers need not change.
-    def setPlainText(self, text):   self.editor.setPlainText(text)
+    def setPlainText(self, text):
+        # Temporarily block ALL document signals while replacing content.
+        # This prevents any connected timers or slots (e.g. compare timer)
+        # from firing mid-replacement, which causes 0xC0000409 crashes.
+        doc = self.editor.document()
+        doc.blockSignals(True)
+        self.editor.blockSignals(True)
+        try:
+            self.editor.setPlainText(text)
+        finally:
+            doc.blockSignals(False)
+            self.editor.blockSignals(False)
+        self._update_gutter_width()
+        self._gutter.update()
     def toPlainText(self):          return self.editor.toPlainText()
     def setReadOnly(self, val):     self.editor.setReadOnly(val)
     def setFont(self, font):        self.editor.setFont(font)
@@ -434,6 +447,7 @@ class FolderStructureApp(QMainWindow):
         copyright_layout.addWidget(copyright_label)
 
         self._line_compare_active = False
+        self._coloring_in_progress = False
         self._load_last_paths()
 
     # ── Style helpers ────────────────────────────────────────────────────────
@@ -706,6 +720,16 @@ class FolderStructureApp(QMainWindow):
         self._import_txt("right")
 
     # ── Line-by-line color compare ──────────────────────────────────────────
+    #
+    # Design:
+    #   • _line_compare_active  — master on/off flag
+    #   • _coloring_in_progress — reentrancy guard; prevents the cursor edits
+    #     inside _apply_line_colors from re-triggering the timer
+    #   • QTimer (150 ms, single-shot) — debounces rapid contentsChanged events
+    #     (many per keystroke) into one deferred call AFTER Qt finishes the edit
+    #   • LineNumberedEditor.setPlainText() blocks all doc signals while
+    #     replacing content (scan / import), so the timer never fires mid-replace
+    #
     def toggle_line_compare(self):
         self._line_compare_active = not self._line_compare_active
         if self._line_compare_active:
@@ -722,18 +746,19 @@ class FolderStructureApp(QMainWindow):
                 QPushButton:hover { background-color: #4a9a4a; }
                 QPushButton:pressed { background-color: #2a6a2a; }
             """)
+            # Create timer once; recreating each toggle would accumulate
+            # duplicate connections.
+            if not hasattr(self, '_compare_timer'):
+                from PyQt6.QtCore import QTimer
+                self._compare_timer = QTimer(self)
+                self._compare_timer.setSingleShot(True)
+                self._compare_timer.setInterval(150)
+                self._compare_timer.timeout.connect(self._apply_line_colors)
+                self.left_preview.editor.document().contentsChanged.connect(
+                    self._schedule_color_update)
+                self.right_preview.editor.document().contentsChanged.connect(
+                    self._schedule_color_update)
             self._apply_line_colors()
-            # Use a QTimer-based debounce: contentsChanged fires many times per
-            # keystroke and calling _apply_line_colors directly causes a signal
-            # re-entrancy crash (0xC0000409). The timer collapses rapid events
-            # into a single deferred call after Qt finishes the current edit.
-            from PyQt6.QtCore import QTimer
-            self._compare_timer = QTimer(self)
-            self._compare_timer.setSingleShot(True)
-            self._compare_timer.setInterval(80)
-            self._compare_timer.timeout.connect(self._apply_line_colors)
-            self.left_preview.editor.document().contentsChanged.connect(self._compare_timer.start)
-            self.right_preview.editor.document().contentsChanged.connect(self._compare_timer.start)
         else:
             self.btn_compare_names.setText("⬛  Compare Left and Right Names Line by Line")
             self.btn_compare_names.setStyleSheet("""
@@ -750,70 +775,84 @@ class FolderStructureApp(QMainWindow):
             """)
             if hasattr(self, '_compare_timer'):
                 self._compare_timer.stop()
-                try:
-                    self.left_preview.editor.document().contentsChanged.disconnect(self._compare_timer.start)
-                    self.right_preview.editor.document().contentsChanged.disconnect(self._compare_timer.start)
-                except Exception:
-                    pass
             self._clear_line_colors()
 
+    def _schedule_color_update(self):
+        """Called by contentsChanged. Only schedules update when active and
+        not currently inside _apply_line_colors (reentrancy guard)."""
+        if self._line_compare_active and not self._coloring_in_progress:
+            if hasattr(self, '_compare_timer'):
+                self._compare_timer.start()
+
     def _clear_line_colors(self):
-        """Remove all background colors from both previews without triggering signals."""
-        for preview in (self.left_preview, self.right_preview):
-            doc = preview.editor.document()
-            doc.blockSignals(True)
-            try:
-                cursor = QTextCursor(doc)
-                cursor.beginEditBlock()
-                cursor.select(QTextCursor.SelectionType.Document)
-                fmt = QTextCharFormat()
-                fmt.setBackground(QColor("white"))
-                cursor.setCharFormat(fmt)
-                cursor.clearSelection()
-                cursor.endEditBlock()
-            finally:
-                doc.blockSignals(False)
+        """Remove all background colors from both previews."""
+        self._coloring_in_progress = True
+        try:
+            for preview in (self.left_preview, self.right_preview):
+                doc = preview.editor.document()
+                doc.blockSignals(True)
+                try:
+                    cursor = QTextCursor(doc)
+                    cursor.beginEditBlock()
+                    cursor.select(QTextCursor.SelectionType.Document)
+                    fmt = QTextCharFormat()
+                    fmt.setBackground(QColor("white"))
+                    cursor.setCharFormat(fmt)
+                    cursor.clearSelection()
+                    cursor.endEditBlock()
+                finally:
+                    doc.blockSignals(False)
+                preview._update_gutter_width()
+                preview._gutter.update()
+        finally:
+            self._coloring_in_progress = False
 
     def _apply_line_colors(self):
-        """Color each line in both previews based on line-index comparison.
-        Uses blockSignals() to prevent contentsChanged from firing during
-        formatting, which would cause infinite recursion / stack overflow."""
-        COLOR_EQUAL = QColor("#b8f0b8")   # light green  — same name both sides
-        COLOR_DIFF  = QColor("#f0b8b8")   # light red    — different names same line
-        COLOR_ONLY  = QColor("#f0f0b0")   # light yellow — line exists one side only
+        """Color each line in both previews by line-index comparison.
+        Fully guarded against reentrancy and empty-document edge cases."""
+        if self._coloring_in_progress:
+            return
+        if not self._line_compare_active:
+            return
+        self._coloring_in_progress = True
+        try:
+            COLOR_EQUAL = QColor("#b8f0b8")
+            COLOR_DIFF  = QColor("#f0b8b8")
+            COLOR_ONLY  = QColor("#f0f0b0")
 
-        left_lines  = self.left_preview.editor.document().toPlainText().splitlines()
-        right_lines = self.right_preview.editor.document().toPlainText().splitlines()
+            left_lines  = self.left_preview.editor.document().toPlainText().splitlines()
+            right_lines = self.right_preview.editor.document().toPlainText().splitlines()
 
-        def _color_doc(preview, lines, partner_lines):
-            doc = preview.editor.document()
-            doc.blockSignals(True)
-            try:
-                cursor = QTextCursor(doc)
-                cursor.beginEditBlock()
-                for i in range(doc.blockCount()):
-                    block = doc.findBlockByNumber(i)
-                    if not block.isValid():
-                        break
-                    bc = QTextCursor(block)
-                    bc.select(QTextCursor.SelectionType.BlockUnderCursor)
-                    fmt = QTextCharFormat()
-                    if i >= len(partner_lines):
-                        fmt.setBackground(COLOR_ONLY)
-                    else:
-                        if lines[i].strip() == partner_lines[i].strip():
+            def _color_doc(preview, lines, partner_lines):
+                doc = preview.editor.document()
+                doc.blockSignals(True)
+                try:
+                    cursor = QTextCursor(doc)
+                    cursor.beginEditBlock()
+                    for i in range(doc.blockCount()):
+                        block = doc.findBlockByNumber(i)
+                        if not block.isValid():
+                            break
+                        bc = QTextCursor(block)
+                        bc.select(QTextCursor.SelectionType.BlockUnderCursor)
+                        fmt = QTextCharFormat()
+                        if i >= len(partner_lines):
+                            fmt.setBackground(COLOR_ONLY)
+                        elif lines[i].strip() == partner_lines[i].strip():
                             fmt.setBackground(COLOR_EQUAL)
                         else:
                             fmt.setBackground(COLOR_DIFF)
-                    bc.setCharFormat(fmt)
-                cursor.endEditBlock()
-            finally:
-                doc.blockSignals(False)
-            # Refresh gutter (blockSignals suppressed blockCountChanged)
-            preview._update_gutter_width()
+                        bc.setCharFormat(fmt)
+                    cursor.endEditBlock()
+                finally:
+                    doc.blockSignals(False)
+                preview._update_gutter_width()
+                preview._gutter.update()
 
-        _color_doc(self.left_preview,  left_lines,  right_lines)
-        _color_doc(self.right_preview, right_lines, left_lines)
+            _color_doc(self.left_preview,  left_lines,  right_lines)
+            _color_doc(self.right_preview, right_lines, left_lines)
+        finally:
+            self._coloring_in_progress = False
 
     # ── Compare ──────────────────────────────────────────────────────────────
     def compare_previews(self):
