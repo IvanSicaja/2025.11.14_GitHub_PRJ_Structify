@@ -306,6 +306,18 @@ class FolderStructureApp(QMainWindow):
         panels_layout.setSpacing(16)
         self.main_layout.addLayout(panels_layout, stretch=1)
 
+        # ── Sync scroll checkbox — centered below both scan-button rows ──
+        sync_row = QHBoxLayout()
+        sync_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sync_row.setSpacing(8)
+        self.main_layout.addLayout(sync_row)
+
+        self.cb_sync_scroll = QCheckBox("Sync scroll — scrolling one preview automatically scrolls the other")
+        self.cb_sync_scroll.setChecked(False)
+        self.cb_sync_scroll.setStyleSheet("font-size: 13px; color: #e0e0e0;")
+        self.cb_sync_scroll.stateChanged.connect(self._on_sync_scroll_toggled)
+        sync_row.addWidget(self.cb_sync_scroll)
+
         # Left panel
         self._setup_panel(panels_layout, "Source Folder 1", "left",
                           self.scan_left, self.export_left, self.import_txt_left,
@@ -458,6 +470,8 @@ class FolderStructureApp(QMainWindow):
 
         self._line_compare_active = False
         self._coloring_in_progress = False
+        self._sync_scroll_active = False
+        self._syncing_scroll = False   # reentrancy guard
         self._load_last_paths()
 
     # ── Style helpers ────────────────────────────────────────────────────────
@@ -596,6 +610,60 @@ class FolderStructureApp(QMainWindow):
         except Exception:
             pass
         super().closeEvent(event)
+
+    # ── Sync scroll ─────────────────────────────────────────────────────────
+    def _on_sync_scroll_toggled(self, state):
+        self._sync_scroll_active = bool(state)
+        if self._sync_scroll_active:
+            self.left_preview.editor.verticalScrollBar().valueChanged.connect(
+                self._sync_scroll_left_to_right)
+            self.right_preview.editor.verticalScrollBar().valueChanged.connect(
+                self._sync_scroll_right_to_left)
+        else:
+            try:
+                self.left_preview.editor.verticalScrollBar().valueChanged.disconnect(
+                    self._sync_scroll_left_to_right)
+            except Exception:
+                pass
+            try:
+                self.right_preview.editor.verticalScrollBar().valueChanged.disconnect(
+                    self._sync_scroll_right_to_left)
+            except Exception:
+                pass
+
+    def _sync_scroll_left_to_right(self, value):
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        try:
+            r_bar = self.right_preview.editor.verticalScrollBar()
+            l_bar = self.left_preview.editor.verticalScrollBar()
+            l_max = l_bar.maximum()
+            r_max = r_bar.maximum()
+            if l_max > 0:
+                ratio = value / l_max
+                r_bar.setValue(int(ratio * r_max))
+            else:
+                r_bar.setValue(0)
+        finally:
+            self._syncing_scroll = False
+
+    def _sync_scroll_right_to_left(self, value):
+        if self._syncing_scroll:
+            return
+        self._syncing_scroll = True
+        try:
+            l_bar = self.left_preview.editor.verticalScrollBar()
+            r_bar = self.right_preview.editor.verticalScrollBar()
+            r_max = r_bar.maximum()
+            l_max = l_bar.maximum()
+            if r_max > 0:
+                ratio = value / r_max
+                l_bar.setValue(int(ratio * l_max))
+            else:
+                l_bar.setValue(0)
+        finally:
+            self._syncing_scroll = False
 
     # ── Scan ─────────────────────────────────────────────────────────────────
     def _do_scan(self, prefix):
