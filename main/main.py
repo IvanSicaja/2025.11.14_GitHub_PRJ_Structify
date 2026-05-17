@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QStyleFactory, QRadioButton, QButtonGroup,
     QDialog, QDialogButtonBox, QCheckBox, QFrame
 )
-from PyQt6.QtCore import Qt, QSize, QRect
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor, QPainter, QPalette
 
 LAST_PATHS_FILE = "structify_last_paths.json"
@@ -79,6 +79,10 @@ class LineNumberedEditor(QWidget):
     The inner QTextEdit is fully editable and accessible via .editor.
     """
 
+    # Emitted after ANY content change (typing or setPlainText).
+    # Safe to connect to — never fires during signal-blocked operations.
+    text_changed = pyqtSignal()
+
     # Proxy the most-used QTextEdit methods so callers need not change.
     def setPlainText(self, text):
         # Temporarily block ALL document signals while replacing content.
@@ -94,6 +98,8 @@ class LineNumberedEditor(QWidget):
             self.editor.blockSignals(False)
         self._update_gutter_width()
         self._gutter.update()
+        # Emit our own safe signal AFTER signals are unblocked and gutter updated.
+        self.text_changed.emit()
     def toPlainText(self):          return self.editor.toPlainText()
     def setReadOnly(self, val):     self.editor.setReadOnly(val)
     def setFont(self, font):        self.editor.setFont(font)
@@ -135,6 +141,9 @@ class LineNumberedEditor(QWidget):
         self.editor.document().documentLayout().documentSizeChanged.connect(
             lambda _: self._gutter.update()
         )
+        # Forward raw contentsChanged as our safe text_changed signal.
+        # (setPlainText blocks this and emits text_changed manually instead.)
+        self.editor.document().contentsChanged.connect(self.text_changed)
         self._update_gutter_width()
 
     def _gutter_width(self):
@@ -754,10 +763,8 @@ class FolderStructureApp(QMainWindow):
                 self._compare_timer.setSingleShot(True)
                 self._compare_timer.setInterval(150)
                 self._compare_timer.timeout.connect(self._apply_line_colors)
-                self.left_preview.editor.document().contentsChanged.connect(
-                    self._schedule_color_update)
-                self.right_preview.editor.document().contentsChanged.connect(
-                    self._schedule_color_update)
+                self.left_preview.text_changed.connect(self._schedule_color_update)
+                self.right_preview.text_changed.connect(self._schedule_color_update)
             self._apply_line_colors()
         else:
             self.btn_compare_names.setText("Compare Left and Right Names Line by Line")
