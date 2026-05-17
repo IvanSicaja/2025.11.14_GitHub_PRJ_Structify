@@ -109,6 +109,7 @@ class LineNumberedEditor(QWidget):
 
         self.editor = QTextEdit(self)
         self.editor.setFont(QFont("SF Mono", 12))
+        self.editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.editor.setStyleSheet("""
             QTextEdit {
                 background-color: #ffffff;
@@ -596,17 +597,23 @@ class FolderStructureApp(QMainWindow):
                     self.left_path_edit.setText(data["left"])
                 if "right" in data and os.path.isdir(data["right"]):
                     self.right_path_edit.setText(data["right"])
+                if data.get("left_preview", "").strip():
+                    self.left_preview.setPlainText(data["left_preview"])
+                if data.get("right_preview", "").strip():
+                    self.right_preview.setPlainText(data["right_preview"])
         except Exception:
             pass
 
     def closeEvent(self, event):
-        paths = {
-            "left": self.left_path_edit.text().strip(),
-            "right": self.right_path_edit.text().strip()
+        data = {
+            "left":          self.left_path_edit.text().strip(),
+            "right":         self.right_path_edit.text().strip(),
+            "left_preview":  self.left_preview.toPlainText(),
+            "right_preview": self.right_preview.toPlainText(),
         }
         try:
             with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
-                json.dump(paths, f, indent=2)
+                json.dump(data, f, indent=2)
         except Exception:
             pass
         super().closeEvent(event)
