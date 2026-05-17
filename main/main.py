@@ -372,20 +372,19 @@ class FolderStructureApp(QMainWindow):
         row_compare_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addLayout(row_compare_names)
 
-        self.btn_compare_names = QPushButton("⬛  Compare Left and Right Names Line by Line")
+        self.btn_compare_names = QPushButton("Compare Left and Right Names Line by Line")
         self.btn_compare_names.setStyleSheet("""
             QPushButton {
-                background-color: #5a5a8a;
+                background-color: #707070;
                 color: white;
                 font-weight: bold;
                 font-size: 13px;
-                min-width: 520px;
                 border-radius: 6px;
             }
-            QPushButton:hover { background-color: #6a6aaa; }
-            QPushButton:pressed { background-color: #4a4a7a; }
+            QPushButton:hover { background-color: #888888; }
+            QPushButton:pressed { background-color: #555555; }
         """)
-        self.btn_compare_names.setFixedHeight(42)
+        self.btn_compare_names.setFixedHeight(48)
         self.btn_compare_names.setFixedWidth(520)
         self.btn_compare_names.clicked.connect(self.toggle_line_compare)
         row_compare_names.addWidget(self.btn_compare_names)
@@ -399,18 +398,20 @@ class FolderStructureApp(QMainWindow):
         def _legend_item(color_hex, text):
             w = QWidget()
             hl = QHBoxLayout(w)
-            hl.setContentsMargins(0, 0, 0, 0)
-            hl.setSpacing(6)
-            swatch = QLabel("  ")
-            swatch.setFixedSize(18, 18)
-            swatch.setStyleSheet(f"background-color: {color_hex}; border: 1px solid #aaa; border-radius: 3px;")
+            hl.setContentsMargins(6, 4, 10, 4)
+            hl.setSpacing(8)
+            swatch = QLabel()
+            swatch.setFixedSize(20, 20)
+            swatch.setStyleSheet(
+                f"background-color: {color_hex}; border: 1px solid #999; border-radius: 4px;"
+            )
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-size: 12px; color: #e0e0e0;")
+            lbl.setStyleSheet("font-size: 12px; color: #e0e0e0; font-weight: bold;")
             hl.addWidget(swatch)
             hl.addWidget(lbl)
             return w
 
-        legend_layout.addWidget(_legend_item("#b8f0b8", "Equal names on same line"))
+        legend_layout.addWidget(_legend_item("#b8f0b8", "Same name on both lines"))
         legend_layout.addWidget(_legend_item("#f0b8b8", "Different names on same line"))
         legend_layout.addWidget(_legend_item("#f0f0b0", "Line exists on one side only"))
 
@@ -733,18 +734,17 @@ class FolderStructureApp(QMainWindow):
     def toggle_line_compare(self):
         self._line_compare_active = not self._line_compare_active
         if self._line_compare_active:
-            self.btn_compare_names.setText("✖  Compare Left and Right Names Line by Line  (ON — click to turn off)")
+            self.btn_compare_names.setText("Compare Left and Right Names Line by Line  ✔  ON")
             self.btn_compare_names.setStyleSheet("""
                 QPushButton {
-                    background-color: #3a7a3a;
+                    background-color: #4CAF50;
                     color: white;
                     font-weight: bold;
                     font-size: 13px;
-                    min-width: 380px;
                     border-radius: 6px;
                 }
-                QPushButton:hover { background-color: #4a9a4a; }
-                QPushButton:pressed { background-color: #2a6a2a; }
+                QPushButton:hover { background-color: #66BB6A; }
+                QPushButton:pressed { background-color: #388E3C; }
             """)
             # Create timer once; recreating each toggle would accumulate
             # duplicate connections.
@@ -760,18 +760,17 @@ class FolderStructureApp(QMainWindow):
                     self._schedule_color_update)
             self._apply_line_colors()
         else:
-            self.btn_compare_names.setText("⬛  Compare Left and Right Names Line by Line")
+            self.btn_compare_names.setText("Compare Left and Right Names Line by Line")
             self.btn_compare_names.setStyleSheet("""
                 QPushButton {
-                    background-color: #5a5a8a;
+                    background-color: #707070;
                     color: white;
                     font-weight: bold;
                     font-size: 13px;
-                    min-width: 380px;
                     border-radius: 6px;
                 }
-                QPushButton:hover { background-color: #6a6aaa; }
-                QPushButton:pressed { background-color: #4a4a7a; }
+                QPushButton:hover { background-color: #888888; }
+                QPushButton:pressed { background-color: #555555; }
             """)
             if hasattr(self, '_compare_timer'):
                 self._compare_timer.stop()
