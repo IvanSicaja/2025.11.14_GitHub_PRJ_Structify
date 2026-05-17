@@ -609,7 +609,10 @@ class FolderStructureApp(QMainWindow):
         include_files = getattr(self, f"{prefix}_cb_files").isChecked()
         try:
             lines = get_folder_structure(path, recursive, include_folders, include_files)
+            # Pause compare while loading new content to prevent crash.
+            self._pause_compare()
             getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
+            self._resume_compare()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
 
@@ -719,7 +722,9 @@ class FolderStructureApp(QMainWindow):
         try:
             with open(txt_file, encoding="utf-8") as f:
                 lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
+            self._pause_compare()
             getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
+            self._resume_compare()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
@@ -740,7 +745,36 @@ class FolderStructureApp(QMainWindow):
     #   • LineNumberedEditor.setPlainText() blocks all doc signals while
     #     replacing content (scan / import), so the timer never fires mid-replace
     #
+    def _both_previews_have_content(self):
+        """Return True only when both previews contain at least one non-empty line."""
+        l = self.left_preview.toPlainText().strip()
+        r = self.right_preview.toPlainText().strip()
+        return bool(l) and bool(r)
+
+    def _pause_compare(self):
+        """Temporarily suspend compare coloring during bulk content replacement."""
+        if hasattr(self, '_compare_timer'):
+            self._compare_timer.stop()
+        self._coloring_in_progress = True   # block any stray signals
+
+    def _resume_compare(self):
+        """Re-enable compare coloring after bulk content replacement."""
+        self._coloring_in_progress = False
+        if self._line_compare_active:
+            if self._both_previews_have_content():
+                self._apply_line_colors()
+            else:
+                self._clear_line_colors()
+
     def toggle_line_compare(self):
+        # If turning ON but both previews are empty/one-sided, show message.
+        if not self._line_compare_active and not self._both_previews_have_content():
+            QMessageBox.information(
+                self, "Compare Names",
+                "Please scan or load a structure into both\n"
+                "Source Folder 1 and Source Folder 2 previews first."
+            )
+            return
         self._line_compare_active = not self._line_compare_active
         if self._line_compare_active:
             self.btn_compare_names.setText("Compare Left and Right Names Line by Line  ✔  ON")
