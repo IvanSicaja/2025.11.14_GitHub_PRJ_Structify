@@ -353,6 +353,55 @@ class FolderStructureApp(QMainWindow):
         info_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label2)
 
+        # Compare line-by-line button
+        row_compare_names = QHBoxLayout()
+        row_compare_names.setSpacing(20)
+        row_compare_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addLayout(row_compare_names)
+
+        self.btn_compare_names = QPushButton("⬛  Compare Left and Right Names Line by Line")
+        self.btn_compare_names.setStyleSheet("""
+            QPushButton {
+                background-color: #5a5a8a;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                min-width: 520px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #6a6aaa; }
+            QPushButton:pressed { background-color: #4a4a7a; }
+        """)
+        self.btn_compare_names.setFixedHeight(42)
+        self.btn_compare_names.setFixedWidth(520)
+        self.btn_compare_names.clicked.connect(self.toggle_line_compare)
+        row_compare_names.addWidget(self.btn_compare_names)
+
+        # Legend
+        legend_layout = QHBoxLayout()
+        legend_layout.setSpacing(20)
+        legend_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bottom_layout.addLayout(legend_layout)
+
+        def _legend_item(color_hex, text):
+            w = QWidget()
+            hl = QHBoxLayout(w)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(6)
+            swatch = QLabel("  ")
+            swatch.setFixedSize(18, 18)
+            swatch.setStyleSheet(f"background-color: {color_hex}; border: 1px solid #aaa; border-radius: 3px;")
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 12px; color: #e0e0e0;")
+            hl.addWidget(swatch)
+            hl.addWidget(lbl)
+            return w
+
+        legend_layout.addWidget(_legend_item("#b8f0b8", "Equal names on same line"))
+        legend_layout.addWidget(_legend_item("#f0b8b8", "Different names on same line"))
+        legend_layout.addWidget(_legend_item("#f0f0b0", "Line exists on one side only"))
+
+        # Rename button
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -384,6 +433,7 @@ class FolderStructureApp(QMainWindow):
         copyright_label.setStyleSheet("color: #666666; font-size: 12px; font-style: italic;")
         copyright_layout.addWidget(copyright_label)
 
+        self._line_compare_active = False
         self._load_last_paths()
 
     # ── Style helpers ────────────────────────────────────────────────────────
@@ -654,6 +704,116 @@ class FolderStructureApp(QMainWindow):
 
     def import_txt_right(self):
         self._import_txt("right")
+
+    # ── Line-by-line color compare ──────────────────────────────────────────
+    def toggle_line_compare(self):
+        self._line_compare_active = not self._line_compare_active
+        if self._line_compare_active:
+            self.btn_compare_names.setText("✖  Compare Left and Right Names Line by Line  (ON — click to turn off)")
+            self.btn_compare_names.setStyleSheet("""
+                QPushButton {
+                    background-color: #3a7a3a;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 13px;
+                    min-width: 380px;
+                    border-radius: 6px;
+                }
+                QPushButton:hover { background-color: #4a9a4a; }
+                QPushButton:pressed { background-color: #2a6a2a; }
+            """)
+            self._apply_line_colors()
+            # Use a QTimer-based debounce: contentsChanged fires many times per
+            # keystroke and calling _apply_line_colors directly causes a signal
+            # re-entrancy crash (0xC0000409). The timer collapses rapid events
+            # into a single deferred call after Qt finishes the current edit.
+            from PyQt6.QtCore import QTimer
+            self._compare_timer = QTimer(self)
+            self._compare_timer.setSingleShot(True)
+            self._compare_timer.setInterval(80)
+            self._compare_timer.timeout.connect(self._apply_line_colors)
+            self.left_preview.editor.document().contentsChanged.connect(self._compare_timer.start)
+            self.right_preview.editor.document().contentsChanged.connect(self._compare_timer.start)
+        else:
+            self.btn_compare_names.setText("⬛  Compare Left and Right Names Line by Line")
+            self.btn_compare_names.setStyleSheet("""
+                QPushButton {
+                    background-color: #5a5a8a;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 13px;
+                    min-width: 380px;
+                    border-radius: 6px;
+                }
+                QPushButton:hover { background-color: #6a6aaa; }
+                QPushButton:pressed { background-color: #4a4a7a; }
+            """)
+            if hasattr(self, '_compare_timer'):
+                self._compare_timer.stop()
+                try:
+                    self.left_preview.editor.document().contentsChanged.disconnect(self._compare_timer.start)
+                    self.right_preview.editor.document().contentsChanged.disconnect(self._compare_timer.start)
+                except Exception:
+                    pass
+            self._clear_line_colors()
+
+    def _clear_line_colors(self):
+        """Remove all background colors from both previews without triggering signals."""
+        for preview in (self.left_preview, self.right_preview):
+            doc = preview.editor.document()
+            doc.blockSignals(True)
+            try:
+                cursor = QTextCursor(doc)
+                cursor.beginEditBlock()
+                cursor.select(QTextCursor.SelectionType.Document)
+                fmt = QTextCharFormat()
+                fmt.setBackground(QColor("white"))
+                cursor.setCharFormat(fmt)
+                cursor.clearSelection()
+                cursor.endEditBlock()
+            finally:
+                doc.blockSignals(False)
+
+    def _apply_line_colors(self):
+        """Color each line in both previews based on line-index comparison.
+        Uses blockSignals() to prevent contentsChanged from firing during
+        formatting, which would cause infinite recursion / stack overflow."""
+        COLOR_EQUAL = QColor("#b8f0b8")   # light green  — same name both sides
+        COLOR_DIFF  = QColor("#f0b8b8")   # light red    — different names same line
+        COLOR_ONLY  = QColor("#f0f0b0")   # light yellow — line exists one side only
+
+        left_lines  = self.left_preview.editor.document().toPlainText().splitlines()
+        right_lines = self.right_preview.editor.document().toPlainText().splitlines()
+
+        def _color_doc(preview, lines, partner_lines):
+            doc = preview.editor.document()
+            doc.blockSignals(True)
+            try:
+                cursor = QTextCursor(doc)
+                cursor.beginEditBlock()
+                for i in range(doc.blockCount()):
+                    block = doc.findBlockByNumber(i)
+                    if not block.isValid():
+                        break
+                    bc = QTextCursor(block)
+                    bc.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    fmt = QTextCharFormat()
+                    if i >= len(partner_lines):
+                        fmt.setBackground(COLOR_ONLY)
+                    else:
+                        if lines[i].strip() == partner_lines[i].strip():
+                            fmt.setBackground(COLOR_EQUAL)
+                        else:
+                            fmt.setBackground(COLOR_DIFF)
+                    bc.setCharFormat(fmt)
+                cursor.endEditBlock()
+            finally:
+                doc.blockSignals(False)
+            # Refresh gutter (blockSignals suppressed blockCountChanged)
+            preview._update_gutter_width()
+
+        _color_doc(self.left_preview,  left_lines,  right_lines)
+        _color_doc(self.right_preview, right_lines, left_lines)
 
     # ── Compare ──────────────────────────────────────────────────────────────
     def compare_previews(self):
