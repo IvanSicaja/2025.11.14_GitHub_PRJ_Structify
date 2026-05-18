@@ -113,6 +113,8 @@ class LineNumberedEditor(QWidget):
         self._apply_fixed_line_height()
         self._update_gutter_width()
         self._gutter.update()
+        # Always reset horizontal scroll to leftmost position after loading content.
+        self.editor.horizontalScrollBar().setValue(0)
         # Emit our own safe signal AFTER signals are unblocked and gutter updated.
         self.text_changed.emit()
     def toPlainText(self):          return self.editor.toPlainText()
