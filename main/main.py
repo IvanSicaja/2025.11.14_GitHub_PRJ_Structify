@@ -195,6 +195,10 @@ class LineNumberedEditor(QWidget):
             }
         """)
 
+        # Always show horizontal scrollbar so both panels have identical height
+        # and lines stay vertically aligned when sync-scrolling.
+        self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.editor.document().blockCountChanged.connect(self._update_gutter_width)
         self.editor.verticalScrollBar().valueChanged.connect(self._gutter.update)
         self.editor.document().documentLayout().documentSizeChanged.connect(
@@ -350,8 +354,8 @@ class FolderStructureApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Structify - Folder Structure Replicator")
         screen = QApplication.primaryScreen().availableGeometry()
-        self.resize(screen.width(), screen.height())
-        self.setMinimumSize(QSize(1280, 720))
+        self.resize(int(screen.width() * 0.70), screen.height())
+        self.setMinimumSize(QSize(1000, 720))
 
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
