@@ -679,10 +679,20 @@ class FolderStructureApp(QMainWindow):
                     self.left_radio_recursive.setChecked(True)
                 else:
                     self.left_radio_only_root.setChecked(True)
-            if "left_folders" in data:
-                self.left_cb_folders.setChecked(bool(data["left_folders"]))
-            if "left_files" in data:
-                self.left_cb_files.setChecked(bool(data["left_files"]))
+            # Restore checkboxes: disconnect guards, set both, reconnect.
+            # This prevents the guard from forcing one back on while we set the other.
+            if "left_folders" in data and "left_files" in data:
+                lf = bool(data["left_folders"])
+                li = bool(data["left_files"])
+                self.left_cb_folders.blockSignals(True)
+                self.left_cb_files.blockSignals(True)
+                self.left_cb_folders.setChecked(lf)
+                self.left_cb_files.setChecked(li)
+                # Guarantee at least one is checked
+                if not lf and not li:
+                    self.left_cb_folders.setChecked(True)
+                self.left_cb_folders.blockSignals(False)
+                self.left_cb_files.blockSignals(False)
 
             # Scan options — right
             if "right_recursive" in data:
@@ -690,10 +700,17 @@ class FolderStructureApp(QMainWindow):
                     self.right_radio_recursive.setChecked(True)
                 else:
                     self.right_radio_only_root.setChecked(True)
-            if "right_folders" in data:
-                self.right_cb_folders.setChecked(bool(data["right_folders"]))
-            if "right_files" in data:
-                self.right_cb_files.setChecked(bool(data["right_files"]))
+            if "right_folders" in data and "right_files" in data:
+                rf = bool(data["right_folders"])
+                ri = bool(data["right_files"])
+                self.right_cb_folders.blockSignals(True)
+                self.right_cb_files.blockSignals(True)
+                self.right_cb_folders.setChecked(rf)
+                self.right_cb_files.setChecked(ri)
+                if not rf and not ri:
+                    self.right_cb_folders.setChecked(True)
+                self.right_cb_folders.blockSignals(False)
+                self.right_cb_files.blockSignals(False)
 
             # Preview font
             family = data.get("font_family", "SF Mono")
