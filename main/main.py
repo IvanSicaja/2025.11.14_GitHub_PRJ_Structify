@@ -84,6 +84,20 @@ class LineNumberedEditor(QWidget):
     text_changed = pyqtSignal()
 
     # Proxy the most-used QTextEdit methods so callers need not change.
+    def _apply_fixed_line_height(self):
+        """Apply fixed 22px line height to every block in the document."""
+        from PyQt6.QtGui import QTextBlockFormat
+        from PyQt6.QtWidgets import QTextEdit as _QTE
+        block_fmt = QTextBlockFormat()
+        block_fmt.setLineHeight(22, 4)   # 4 = FixedHeight
+        doc = self.editor.document()
+        cur = self.editor.textCursor()
+        cur.select(cur.SelectionType.Document)
+        cur.setBlockFormat(block_fmt)
+        # Move cursor to end to deselect
+        cur.clearSelection()
+        self.editor.setTextCursor(cur)
+
     def setPlainText(self, text):
         # Temporarily block ALL document signals while replacing content.
         # This prevents any connected timers or slots (e.g. compare timer)
@@ -96,6 +110,7 @@ class LineNumberedEditor(QWidget):
         finally:
             doc.blockSignals(False)
             self.editor.blockSignals(False)
+        self._apply_fixed_line_height()
         self._update_gutter_width()
         self._gutter.update()
         # Emit our own safe signal AFTER signals are unblocked and gutter updated.
@@ -110,12 +125,55 @@ class LineNumberedEditor(QWidget):
         self.editor = QTextEdit(self)
         self.editor.setFont(QFont("SF Mono", 12))
         self.editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+
+        # Fixed line height: every block always exactly 22px tall regardless
+        # of font, special chars, or ascender/descender differences.
+        from PyQt6.QtGui import QTextBlockFormat
+        block_fmt = QTextBlockFormat()
+        block_fmt.setLineHeight(22, 4)   # 4 = FixedHeight mode (exact px)
+        cur = self.editor.textCursor()
+        cur.select(cur.SelectionType.Document)
+        cur.setBlockFormat(block_fmt)
+        self.editor.setTextCursor(cur)
+
         self.editor.setStyleSheet("""
             QTextEdit {
                 background-color: #ffffff;
                 color: #000000;
                 border: none;
                 padding: 4px 8px;
+            }
+            QScrollBar:vertical {
+                background: #d8d8d8;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #888888;
+                min-height: 24px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #555555;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                background: #d8d8d8;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #888888;
+                min-width: 24px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #555555;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
             }
         """)
 
@@ -291,8 +349,9 @@ class FolderStructureApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Structify - Folder Structure Replicator")
-        self.resize(1440, 780)
-        self.setMinimumSize(QSize(1200, 680))
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(screen.width(), screen.height())
+        self.setMinimumSize(QSize(1280, 720))
 
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
@@ -315,7 +374,7 @@ class FolderStructureApp(QMainWindow):
 
         self.cb_sync_scroll = QCheckBox("Sync scroll — scrolling one preview automatically scrolls the other")
         self.cb_sync_scroll.setChecked(False)
-        self.cb_sync_scroll.setStyleSheet("font-size: 13px; color: #e0e0e0;")
+        self.cb_sync_scroll.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0; font-weight: 500; letter-spacing: 0.2px;")
         self.cb_sync_scroll.stateChanged.connect(self._on_sync_scroll_toggled)
         sync_row.addWidget(self.cb_sync_scroll)
 
@@ -343,19 +402,19 @@ class FolderStructureApp(QMainWindow):
 
         btn_rep_left = QPushButton("Replicate Left Preview")
         btn_rep_left.setStyleSheet(self._blue_btn_style())
-        btn_rep_left.setFixedHeight(48)
+        btn_rep_left.setFixedHeight(32)
         btn_rep_left.clicked.connect(self.replicate_left)
         row1.addWidget(btn_rep_left)
 
         btn_compare = QPushButton("Compare Structures")
         btn_compare.setStyleSheet(self._green_btn_style())
-        btn_compare.setFixedHeight(48)
+        btn_compare.setFixedHeight(32)
         btn_compare.clicked.connect(self.compare_previews)
         row1.addWidget(btn_compare)
 
         btn_rep_right = QPushButton("Replicate Right Preview")
         btn_rep_right.setStyleSheet(self._blue_btn_style())
-        btn_rep_right.setFixedHeight(48)
+        btn_rep_right.setFixedHeight(32)
         btn_rep_right.clicked.connect(self.replicate_right)
         row1.addWidget(btn_rep_right)
 
@@ -367,7 +426,7 @@ class FolderStructureApp(QMainWindow):
 
         # Row 2: Batch Rename section
         rename_label = QLabel("Batch Rename")
-        rename_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #e0e0e0;")
+        rename_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-weight: 600; font-size: 13px; color: #e0e0e0;")
         rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(rename_label)
 
@@ -376,7 +435,7 @@ class FolderStructureApp(QMainWindow):
             "Right preview = the final names after renaming   |   "
             "Names are matched line-by-line in the same order."
         )
-        info_label.setStyleSheet("font-size: 13px; color: #e0e0e0;")
+        info_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0;")
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label)
 
@@ -384,7 +443,7 @@ class FolderStructureApp(QMainWindow):
             "Clicking the button below will rename all items in the Left source folder "
             "so that every current name is replaced with the corresponding name from the Right preview."
         )
-        info_label2.setStyleSheet("font-size: 13px; color: #e0e0e0;")
+        info_label2.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0;")
         info_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label2)
 
@@ -406,7 +465,7 @@ class FolderStructureApp(QMainWindow):
             QPushButton:hover { background-color: #888888; }
             QPushButton:pressed { background-color: #555555; }
         """)
-        self.btn_compare_names.setFixedHeight(48)
+        self.btn_compare_names.setFixedHeight(32)
         self.btn_compare_names.setFixedWidth(520)
         self.btn_compare_names.clicked.connect(self.toggle_line_compare)
         row_compare_names.addWidget(self.btn_compare_names)
@@ -428,7 +487,7 @@ class FolderStructureApp(QMainWindow):
                 f"background-color: {color_hex}; border: 1px solid #999; border-radius: 4px;"
             )
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-size: 12px; color: #e0e0e0; font-weight: bold;")
+            lbl.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #e0e0e0; font-weight: 600;")
             hl.addWidget(swatch)
             hl.addWidget(lbl)
             return w
@@ -456,7 +515,7 @@ class FolderStructureApp(QMainWindow):
             QPushButton:hover { background-color: #ff6a00; }
             QPushButton:pressed { background-color: #c24f00; }
         """)
-        btn_rename.setFixedHeight(42)
+        btn_rename.setFixedHeight(32)
         btn_rename.clicked.connect(self.batch_rename)
         row2.addWidget(btn_rename)
 
@@ -517,6 +576,7 @@ class FolderStructureApp(QMainWindow):
         path_layout.addWidget(edit)
         btn_browse = QPushButton("Browse")
         btn_browse.setFixedWidth(90)
+        btn_browse.setFixedHeight(28)
         btn_browse.clicked.connect(browse_source_cb)
         path_layout.addWidget(btn_browse)
         layout.addLayout(path_layout)
@@ -575,7 +635,7 @@ class FolderStructureApp(QMainWindow):
         btn_export.clicked.connect(export_cb)
         btn_import.clicked.connect(import_cb)
         for btn in (btn_scan, btn_export, btn_import):
-            btn.setFixedHeight(36)
+            btn.setFixedHeight(28)
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
 
@@ -1112,7 +1172,7 @@ class FolderStructureApp(QMainWindow):
         col_label = QLabel(
             "<b>Current name (left preview)</b>  →  <b>New name (right preview)</b>"
         )
-        col_label.setStyleSheet("font-size: 12px; color: #555;")
+        col_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #555;")
         c_layout.addWidget(col_label)
 
         pairs_lines = "\n".join(f"  {o}  →  {n}" for _, _, o, n in ops)
