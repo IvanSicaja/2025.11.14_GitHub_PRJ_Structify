@@ -669,19 +669,14 @@ class FolderStructureApp(QMainWindow):
                     self.left_path_edit.setText(data["left"])
                 if "right" in data and os.path.isdir(data["right"]):
                     self.right_path_edit.setText(data["right"])
-                if data.get("left_preview", "").strip():
-                    self.left_preview.setPlainText(data["left_preview"])
-                if data.get("right_preview", "").strip():
-                    self.right_preview.setPlainText(data["right_preview"])
+
         except Exception:
             pass
 
     def closeEvent(self, event):
         data = {
-            "left":          self.left_path_edit.text().strip(),
-            "right":         self.right_path_edit.text().strip(),
-            "left_preview":  self.left_preview.toPlainText(),
-            "right_preview": self.right_preview.toPlainText(),
+            "left":  self.left_path_edit.text().strip(),
+            "right": self.right_path_edit.text().strip(),
         }
         try:
             with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
