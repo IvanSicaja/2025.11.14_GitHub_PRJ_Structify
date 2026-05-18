@@ -1,4 +1,12 @@
 {
   "left": "C:/Users/Sicaja/Desktop/2. Car Music",
-  "right": "C:/Users/Sicaja/Desktop/2. Car Music"
+  "right": "C:/Users/Sicaja/Desktop/2. Car Music",
+  "left_recursive": false,
+  "left_folders": true,
+  "left_files": true,
+  "right_recursive": false,
+  "right_folders": true,
+  "right_files": false,
+  "font_family": "SF Mono",
+  "font_size": 12
 }

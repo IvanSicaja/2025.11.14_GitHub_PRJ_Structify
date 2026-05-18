@@ -662,13 +662,46 @@ class FolderStructureApp(QMainWindow):
     # ── Persistence ──────────────────────────────────────────────────────────
     def _load_last_paths(self):
         try:
-            if os.path.exists(LAST_PATHS_FILE):
-                with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if "left" in data and os.path.isdir(data["left"]):
-                    self.left_path_edit.setText(data["left"])
-                if "right" in data and os.path.isdir(data["right"]):
-                    self.right_path_edit.setText(data["right"])
+            if not os.path.exists(LAST_PATHS_FILE):
+                return
+            with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Paths
+            if "left" in data and os.path.isdir(data["left"]):
+                self.left_path_edit.setText(data["left"])
+            if "right" in data and os.path.isdir(data["right"]):
+                self.right_path_edit.setText(data["right"])
+
+            # Scan options — left
+            if "left_recursive" in data:
+                if data["left_recursive"]:
+                    self.left_radio_recursive.setChecked(True)
+                else:
+                    self.left_radio_only_root.setChecked(True)
+            if "left_folders" in data:
+                self.left_cb_folders.setChecked(bool(data["left_folders"]))
+            if "left_files" in data:
+                self.left_cb_files.setChecked(bool(data["left_files"]))
+
+            # Scan options — right
+            if "right_recursive" in data:
+                if data["right_recursive"]:
+                    self.right_radio_recursive.setChecked(True)
+                else:
+                    self.right_radio_only_root.setChecked(True)
+            if "right_folders" in data:
+                self.right_cb_folders.setChecked(bool(data["right_folders"]))
+            if "right_files" in data:
+                self.right_cb_files.setChecked(bool(data["right_files"]))
+
+            # Preview font
+            family = data.get("font_family", "SF Mono")
+            size   = int(data.get("font_size", 12))
+            if family and size > 0:
+                font = QFont(family, size)
+                self.left_preview.editor.setFont(font)
+                self.right_preview.editor.setFont(font)
 
         except Exception:
             pass
@@ -677,6 +710,16 @@ class FolderStructureApp(QMainWindow):
         data = {
             "left":  self.left_path_edit.text().strip(),
             "right": self.right_path_edit.text().strip(),
+            # Scan options
+            "left_recursive":       self.left_radio_recursive.isChecked(),
+            "left_folders":         self.left_cb_folders.isChecked(),
+            "left_files":           self.left_cb_files.isChecked(),
+            "right_recursive":      self.right_radio_recursive.isChecked(),
+            "right_folders":        self.right_cb_folders.isChecked(),
+            "right_files":          self.right_cb_files.isChecked(),
+            # Preview font
+            "font_family":          self.left_preview.editor.font().family(),
+            "font_size":            self.left_preview.editor.font().pointSize(),
         }
         try:
             with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
