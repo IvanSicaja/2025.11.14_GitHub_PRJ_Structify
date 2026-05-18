@@ -89,7 +89,7 @@ class LineNumberedEditor(QWidget):
         from PyQt6.QtGui import QTextBlockFormat
         from PyQt6.QtWidgets import QTextEdit as _QTE
         block_fmt = QTextBlockFormat()
-        block_fmt.setLineHeight(22, 4)   # 4 = FixedHeight
+        block_fmt.setLineHeight(16, 4)   # 4 = FixedHeight
         doc = self.editor.document()
         cur = self.editor.textCursor()
         cur.select(cur.SelectionType.Document)
@@ -130,7 +130,7 @@ class LineNumberedEditor(QWidget):
         # of font, special chars, or ascender/descender differences.
         from PyQt6.QtGui import QTextBlockFormat
         block_fmt = QTextBlockFormat()
-        block_fmt.setLineHeight(22, 4)   # 4 = FixedHeight mode (exact px)
+        block_fmt.setLineHeight(16, 4)   # 4 = FixedHeight mode (exact px)
         cur = self.editor.textCursor()
         cur.select(cur.SelectionType.Document)
         cur.setBlockFormat(block_fmt)
@@ -141,7 +141,7 @@ class LineNumberedEditor(QWidget):
                 background-color: #ffffff;
                 color: #000000;
                 border: none;
-                padding: 4px 8px;
+                padding: 2px 8px;
             }
             QScrollBar:vertical {
                 background: #d8d8d8;
@@ -354,8 +354,14 @@ class FolderStructureApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Structify - Folder Structure Replicator")
         screen = QApplication.primaryScreen().availableGeometry()
-        self.resize(int(screen.width() * 0.70), screen.height())
+        w = int(screen.width() * 0.70)
+        h = screen.height()
+        self.resize(w, h)
         self.setMinimumSize(QSize(1000, 720))
+        # Center horizontally, align to top of available area
+        x = screen.x() + (screen.width() - w) // 2
+        y = screen.y()
+        self.move(x, y)
 
         if 'Fusion' in QStyleFactory.keys():
             QApplication.setStyle('Fusion')
