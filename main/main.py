@@ -1269,71 +1269,101 @@ class FolderStructureApp(QMainWindow):
         if confirm_dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # ── Execute renames — two-phase to avoid WinError 183 name collisions ──
+        # ── Execute renames — safe two-phase with full rollback protection ──
         #
-        # Problem: if A→B but B already exists (because B→C is also in ops),
-        # os.rename raises WinError 183 / FileExistsError on Windows.
+        # Phase 1: original → unique temp name  (never conflicts)
+        # Phase 2: temp → final name
         #
-        # Solution:
-        #   Phase 1 — rename every source to a guaranteed-unique temp name
-        #   Phase 2 — rename every temp name to the desired final name
+        # If Phase 2 fails for any item, we immediately rename the temp back
+        # to the original name so no file is ever left with a broken temp name.
         #
-        # A running map (old_abs → current_abs) tracks path changes so that
-        # children of renamed parents are resolved correctly throughout.
+        # _resolve() uses os.sep-aware prefix matching to correctly handle
+        # nested paths when a parent folder was already renamed.
 
         import uuid
 
-        current_abs_map = {}   # original old_abs → its current path on disk
+        # original old_abs → temp_abs currently on disk
+        current_abs_map = {}
 
         def _resolve(path):
-            """Adjust `path` if any of its ancestor paths was already renamed."""
-            for old_prefix, cur_prefix in current_abs_map.items():
-                if path == old_prefix or path.startswith(old_prefix + os.sep):
+            """Return the current on-disk path of `path`, accounting for any
+            ancestor that was already moved to a temp name."""
+            # Sort by length descending so deepest (most specific) match wins
+            for old_prefix in sorted(current_abs_map, key=len, reverse=True):
+                cur_prefix = current_abs_map[old_prefix]
+                if path == old_prefix:
+                    return cur_prefix
+                if path.startswith(old_prefix + os.sep):
                     return cur_prefix + path[len(old_prefix):]
             return path
 
-        renamed = []
-        failed = []
-        phase2_ops = []   # (temp_abs, final_abs, old_name, new_name)
+        renamed  = []   # "old → new"  successfully completed
+        failed   = []   # error messages
+        skipped  = []   # items not attempted because path not found
+        phase2_ops = [] # (temp_abs, final_abs, original_abs, old_name, new_name)
 
-        # ── Phase 1: source → temp ──
+        # ── Phase 1: source → temp (never conflicts with anything) ──
         for old_abs, new_abs, old_name, new_name in ops:
             old_resolved = _resolve(old_abs)
-            parent = os.path.dirname(old_resolved)
-            temp_name = f"__structify_tmp_{uuid.uuid4().hex}"
-            temp_abs = os.path.join(parent, temp_name)
-
             if not os.path.exists(old_resolved):
-                failed.append(f'"{old_name}" — path does not exist:\n  {old_resolved}')
+                skipped.append(
+                    f'SKIPPED  "{old_name}"\n'
+                    f'  Expected path not found: {old_resolved}'
+                )
                 continue
-
+            parent   = os.path.dirname(old_resolved)
+            temp_name = f"__structify_tmp_{uuid.uuid4().hex}"
+            temp_abs  = os.path.join(parent, temp_name)
             try:
                 os.rename(old_resolved, temp_abs)
                 current_abs_map[old_abs] = temp_abs
-                phase2_ops.append((temp_abs, os.path.join(parent, new_name), old_name, new_name))
+                phase2_ops.append((temp_abs, os.path.join(parent, new_name),
+                                   old_resolved, old_name, new_name))
             except Exception as e:
-                failed.append(f"{old_resolved}  →  (temp): {e}")
+                failed.append(
+                    f'FAILED Phase 1  "{old_name}"\n  {old_resolved}  \u2192  (temp)\n  Error: {e}'
+                )
 
-        # ── Phase 2: temp → final name ──
-        for temp_abs, final_abs, old_name, new_name in phase2_ops:
+        # ── Phase 2: temp → final name — with immediate rollback on failure ──
+        for temp_abs, final_abs, original_abs, old_name, new_name in phase2_ops:
             try:
                 os.rename(temp_abs, final_abs)
                 renamed.append(f"{old_name}  →  {new_name}")
             except Exception as e:
-                failed.append(f"{temp_abs}  →  {new_name}: {e}")
+                # Rename BACK to original immediately — no file left stranded
+                try:
+                    os.rename(temp_abs, original_abs)
+                    rollback_note = f"  (✔ safely rolled back to original name)"
+                except Exception as re:
+                    rollback_note = (
+                        f"  ⚠ ROLLBACK FAILED — file is currently named:\n  {temp_abs}\n  Rename it back manually to: {os.path.basename(original_abs)}\n  Rollback error: {re}"
+                    )
+                failed.append(
+                    f'FAILED Phase 2  "{old_name}"  →  "{new_name}"\n  Error: {e}\n{rollback_note}'
+                )
 
         # ── Result summary — scrollable custom dialog ──
         summary_lines = []
         if renamed:
-            summary_lines.append(f"✅  Renamed {len(renamed)} item(s) successfully.\n")
+            summary_lines.append(f"✅  Renamed {len(renamed)} item(s) successfully.")
+            summary_lines.append("")
             for r in renamed:
                 summary_lines.append(f"  {r}")
+        if skipped:
+            if summary_lines:
+                summary_lines.append("")
+            summary_lines.append(f"⚠️  {len(skipped)} item(s) not found on disk (not attempted):")
+            summary_lines.append("")
+            for s_msg in skipped:
+                summary_lines.append(f"  {s_msg}")
         if failed:
             if summary_lines:
                 summary_lines.append("")
-            summary_lines.append(f"❌  {len(failed)} error(s):\n")
+            summary_lines.append(f"❌  {len(failed)} error(s) — see details below:")
+            summary_lines.append("")
             for f_msg in failed:
                 summary_lines.append(f"  {f_msg}")
+                summary_lines.append("")
 
         full_text = "\n".join(summary_lines)
 
