@@ -14,6 +14,11 @@ from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor, QPainter, Q
 
 LAST_PATHS_FILE = "structify_last_paths.json"
 
+# ── Fixed editor constants ───────────────────────────────────────────────────
+EDITOR_FONT_FAMILY = "SF Mono"
+EDITOR_FONT_SIZE   = 12          # pt
+EDITOR_LINE_HEIGHT = 16          # px  (FixedHeight mode)
+
 
 def get_folder_structure(root_path, recursive=True, include_folders=True, include_files=True):
     structure = []
@@ -56,7 +61,6 @@ def get_folder_structure(root_path, recursive=True, include_folders=True, includ
     return structure
 
 
-
 class LineNumberArea(QWidget):
     """Gutter widget that paints line numbers next to a QTextEdit."""
 
@@ -76,67 +80,105 @@ class LineNumberedEditor(QWidget):
     """
     A QTextEdit wrapped in a container that shows a read-only line-number
     gutter on the left — styled like a professional code editor.
-    The inner QTextEdit is fully editable and accessible via .editor.
+
+    Formatting is always normalised on every content change:
+      • Fixed font (EDITOR_FONT_FAMILY / EDITOR_FONT_SIZE)
+      • Fixed line height (EDITOR_LINE_HEIGHT px, FixedHeight mode)
+      • No blank lines — empty lines are stripped on paste/type
+      • No external paragraph/character formatting survives paste
     """
 
-    # Emitted after ANY content change (typing or setPlainText).
-    # Safe to connect to — never fires during signal-blocked operations.
     text_changed = pyqtSignal()
 
-    # Proxy the most-used QTextEdit methods so callers need not change.
-    def _apply_fixed_line_height(self):
-        """Apply fixed 22px line height to every block in the document."""
-        from PyQt6.QtGui import QTextBlockFormat
-        from PyQt6.QtWidgets import QTextEdit as _QTE
-        block_fmt = QTextBlockFormat()
-        block_fmt.setLineHeight(16, 4)   # 4 = FixedHeight
-        doc = self.editor.document()
-        cur = self.editor.textCursor()
-        cur.select(cur.SelectionType.Document)
-        cur.setBlockFormat(block_fmt)
-        # Move cursor to end to deselect
-        cur.clearSelection()
-        self.editor.setTextCursor(cur)
+    # ── Internal helpers ─────────────────────────────────────────────────────
+    def _make_font(self):
+        return QFont(EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE)
 
+    def _apply_fixed_format(self):
+        """Strip ALL character/paragraph formatting and re-apply our standards.
+        Called after every content change so pasted text can never survive
+        with foreign fonts, sizes, line-heights, or blank lines."""
+        from PyQt6.QtGui import QTextBlockFormat, QTextCharFormat
+
+        doc = self.editor.document()
+
+        # ── 1. Collect plain text, strip blank lines ──
+        raw = doc.toPlainText()
+        lines = [ln for ln in raw.splitlines() if ln.strip()]
+        clean = "\n".join(lines)
+
+        # ── 2. Replace document content with clean plain text ──
+        # We do this only when something actually changed to avoid
+        # fighting with the user's cursor while they type normally.
+        if raw != clean:
+            cur = self.editor.textCursor()
+            pos = cur.position()
+            doc.blockSignals(True)
+            self.editor.blockSignals(True)
+            try:
+                self.editor.setPlainText(clean)
+            finally:
+                doc.blockSignals(False)
+                self.editor.blockSignals(False)
+            # Restore cursor as best we can
+            cur2 = self.editor.textCursor()
+            cur2.setPosition(min(pos, len(clean)))
+            self.editor.setTextCursor(cur2)
+
+        # ── 3. Apply uniform character format (font) to every block ──
+        char_fmt = QTextCharFormat()
+        char_fmt.setFont(self._make_font())
+        char_fmt.setBackground(QColor("white"))   # no colour bleed from paste
+
+        # ── 4. Apply fixed line height to every block ──
+        block_fmt = QTextBlockFormat()
+        block_fmt.setLineHeight(EDITOR_LINE_HEIGHT, 4)  # 4 = FixedHeight
+        block_fmt.setTopMargin(0)
+        block_fmt.setBottomMargin(0)
+
+        doc.blockSignals(True)
+        try:
+            cur = QTextCursor(doc)
+            cur.beginEditBlock()
+            cur.select(QTextCursor.SelectionType.Document)
+            cur.setCharFormat(char_fmt)
+            cur.setBlockFormat(block_fmt)
+            cur.clearSelection()
+            cur.endEditBlock()
+        finally:
+            doc.blockSignals(False)
+
+        self._update_gutter_width()
+        self._gutter.update()
+
+    # ── Public proxy methods ─────────────────────────────────────────────────
     def setPlainText(self, text):
-        # Temporarily block ALL document signals while replacing content.
-        # This prevents any connected timers or slots (e.g. compare timer)
-        # from firing mid-replacement, which causes 0xC0000409 crashes.
+        """Load content, normalize formatting, reset horizontal scroll."""
         doc = self.editor.document()
         doc.blockSignals(True)
         self.editor.blockSignals(True)
         try:
-            self.editor.setPlainText(text)
+            # Strip blank lines on load too
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            self.editor.setPlainText("\n".join(lines))
         finally:
             doc.blockSignals(False)
             self.editor.blockSignals(False)
-        self._apply_fixed_line_height()
-        self._update_gutter_width()
-        self._gutter.update()
-        # Always reset horizontal scroll to leftmost position after loading content.
+        self._apply_fixed_format()
         self.editor.horizontalScrollBar().setValue(0)
-        # Emit our own safe signal AFTER signals are unblocked and gutter updated.
         self.text_changed.emit()
-    def toPlainText(self):          return self.editor.toPlainText()
-    def setReadOnly(self, val):     self.editor.setReadOnly(val)
-    def setFont(self, font):        self.editor.setFont(font)
 
+    def toPlainText(self):   return self.editor.toPlainText()
+    def setReadOnly(self, v): self.editor.setReadOnly(v)
+    def setFont(self, font):  self.editor.setFont(font)
+
+    # ── Constructor ──────────────────────────────────────────────────────────
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.editor = QTextEdit(self)
-        self.editor.setFont(QFont("SF Mono", 12))
+        self.editor.setFont(self._make_font())
         self.editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-
-        # Fixed line height: every block always exactly 22px tall regardless
-        # of font, special chars, or ascender/descender differences.
-        from PyQt6.QtGui import QTextBlockFormat
-        block_fmt = QTextBlockFormat()
-        block_fmt.setLineHeight(16, 4)   # 4 = FixedHeight mode (exact px)
-        cur = self.editor.textCursor()
-        cur.select(cur.SelectionType.Document)
-        cur.setBlockFormat(block_fmt)
-        self.editor.setTextCursor(cur)
 
         self.editor.setStyleSheet("""
             QTextEdit {
@@ -155,12 +197,8 @@ class LineNumberedEditor(QWidget):
                 min-height: 24px;
                 border-radius: 6px;
             }
-            QScrollBar::handle:vertical:hover {
-                background: #555555;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
+            QScrollBar::handle:vertical:hover { background: #555555; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
             QScrollBar:horizontal {
                 background: #d8d8d8;
                 height: 12px;
@@ -171,16 +209,12 @@ class LineNumberedEditor(QWidget):
                 min-width: 24px;
                 border-radius: 6px;
             }
-            QScrollBar::handle:horizontal:hover {
-                background: #555555;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
+            QScrollBar::handle:horizontal:hover { background: #555555; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
         """)
 
         self._gutter = LineNumberArea(self)
-        self._gutter.setStyleSheet("")  # painted manually
+        self._gutter.setStyleSheet("")
 
         h = QHBoxLayout(self)
         h.setContentsMargins(0, 0, 0, 0)
@@ -188,7 +222,6 @@ class LineNumberedEditor(QWidget):
         h.addWidget(self._gutter)
         h.addWidget(self.editor)
 
-        # Outer border matches the old QTextEdit style
         self.setStyleSheet("""
             LineNumberedEditor {
                 border: 1px solid #d0d4d8;
@@ -197,8 +230,6 @@ class LineNumberedEditor(QWidget):
             }
         """)
 
-        # Always show horizontal scrollbar so both panels have identical height
-        # and lines stay vertically aligned when sync-scrolling.
         self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.editor.document().blockCountChanged.connect(self._update_gutter_width)
@@ -206,11 +237,39 @@ class LineNumberedEditor(QWidget):
         self.editor.document().documentLayout().documentSizeChanged.connect(
             lambda _: self._gutter.update()
         )
-        # Forward raw contentsChanged as our safe text_changed signal.
-        # (setPlainText blocks this and emits text_changed manually instead.)
-        self.editor.document().contentsChanged.connect(self.text_changed)
-        self._update_gutter_width()
 
+        # ── Normalise on every change (typing, paste, undo, etc.) ──
+        # We use a 80 ms debounce timer so rapid keystrokes don't each
+        # trigger a full reformat (which would fight the cursor).
+        from PyQt6.QtCore import QTimer
+        self._norm_timer = QTimer(self)
+        self._norm_timer.setSingleShot(True)
+        self._norm_timer.setInterval(80)
+        self._norm_timer.timeout.connect(self._on_normalize_timer)
+        self._normalizing = False
+        self.editor.document().contentsChanged.connect(self._schedule_normalize)
+
+        # Forward to our safe signal (used by compare feature)
+        self.editor.document().contentsChanged.connect(self.text_changed)
+
+        self._update_gutter_width()
+        # Apply initial format to empty document
+        self._apply_fixed_format()
+
+    def _schedule_normalize(self):
+        if not self._normalizing:
+            self._norm_timer.start()
+
+    def _on_normalize_timer(self):
+        if self._normalizing:
+            return
+        self._normalizing = True
+        try:
+            self._apply_fixed_format()
+        finally:
+            self._normalizing = False
+
+    # ── Gutter ───────────────────────────────────────────────────────────────
     def _gutter_width(self):
         digits = max(2, len(str(self.editor.document().blockCount())))
         return 12 + self.editor.fontMetrics().horizontalAdvance('9') * digits
@@ -225,18 +284,14 @@ class LineNumberedEditor(QWidget):
         block = self.editor.document().begin()
         block_num = 1
         editor_top = self.editor.contentsMargins().top()
-
-        # Map document y-coordinates to gutter y-coordinates
         scroll_y = self.editor.verticalScrollBar().value()
         doc_layout = self.editor.document().documentLayout()
 
         while block.isValid():
             block_rect = doc_layout.blockBoundingRect(block)
             top = int(block_rect.top()) - scroll_y + editor_top
-
             if top > event.rect().bottom():
                 break
-
             bottom = top + int(block_rect.height())
             if bottom >= event.rect().top():
                 painter.setPen(QColor("#999999"))
@@ -253,6 +308,7 @@ class LineNumberedEditor(QWidget):
             block_num += 1
 
         painter.end()
+
 
 class ComparisonDialog(QDialog):
     def __init__(self, left_lines, right_lines, parent=None):
@@ -291,15 +347,15 @@ class ComparisonDialog(QDialog):
         cursor.beginEditBlock()
 
         green = QColor("#e6ffe6")
-        red = QColor("#ffe6e6")
+        red   = QColor("#ffe6e6")
 
-        left_by_level = {}
+        left_by_level  = {}
         right_by_level = {}
 
         for line in left_lines:
             indent = len(line) - len(line.lstrip())
-            level = indent // 2
-            name = line.strip()
+            level  = indent // 2
+            name   = line.strip()
             if level not in left_by_level:
                 left_by_level[level] = set()
             if name:
@@ -307,38 +363,35 @@ class ComparisonDialog(QDialog):
 
         for line in right_lines:
             indent = len(line) - len(line.lstrip())
-            level = indent // 2
-            name = line.strip()
+            level  = indent // 2
+            name   = line.strip()
             if level not in right_by_level:
                 right_by_level[level] = set()
             if name:
                 right_by_level[level].add(name)
 
         max_level = max(
-            max(left_by_level.keys(), default=0),
+            max(left_by_level.keys(),  default=0),
             max(right_by_level.keys(), default=0)
         )
 
         for level in range(max_level + 1):
-            left_names = left_by_level.get(level, set())
+            left_names  = left_by_level.get(level,  set())
             right_names = right_by_level.get(level, set())
 
-            common = sorted(left_names & right_names)
-            for name in common:
+            for name in sorted(left_names & right_names):
                 fmt = QTextCharFormat()
                 fmt.setBackground(green)
                 cursor.setCharFormat(fmt)
                 cursor.insertText(f"  {'  ' * level}{name}\n")
 
-            only_left = sorted(left_names - right_names)
-            for name in only_left:
+            for name in sorted(left_names - right_names):
                 fmt = QTextCharFormat()
                 fmt.setBackground(red)
                 cursor.setCharFormat(fmt)
                 cursor.insertText(f"L {'  ' * level}{name}\n")
 
-            only_right = sorted(right_names - left_names)
-            for name in only_right:
+            for name in sorted(right_names - left_names):
                 fmt = QTextCharFormat()
                 fmt.setBackground(red)
                 cursor.setCharFormat(fmt)
@@ -360,7 +413,6 @@ class FolderStructureApp(QMainWindow):
         h = screen.height()
         self.resize(w, h)
         self.setMinimumSize(QSize(1000, 720))
-        # Center horizontally, align to top of available area
         x = screen.x() + (screen.width() - w) // 2
         y = screen.y()
         self.move(x, y)
@@ -378,7 +430,7 @@ class FolderStructureApp(QMainWindow):
         panels_layout.setSpacing(16)
         self.main_layout.addLayout(panels_layout, stretch=1)
 
-        # ── Sync scroll checkbox — centered below both scan-button rows ──
+        # ── Sync scroll checkbox ──
         sync_row = QHBoxLayout()
         sync_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sync_row.setSpacing(8)
@@ -386,7 +438,10 @@ class FolderStructureApp(QMainWindow):
 
         self.cb_sync_scroll = QCheckBox("Sync scroll — scrolling one preview automatically scrolls the other")
         self.cb_sync_scroll.setChecked(False)
-        self.cb_sync_scroll.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0; font-weight: 500; letter-spacing: 0.2px;")
+        self.cb_sync_scroll.setStyleSheet(
+            "font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; "
+            "font-size: 12px; color: #e0e0e0; font-weight: 500; letter-spacing: 0.2px;"
+        )
         self.cb_sync_scroll.stateChanged.connect(self._on_sync_scroll_toggled)
         sync_row.addWidget(self.cb_sync_scroll)
 
@@ -394,7 +449,6 @@ class FolderStructureApp(QMainWindow):
         self._setup_panel(panels_layout, "Source Folder 1", "left",
                           self.scan_left, self.export_left, self.import_txt_left,
                           self.browse_left_source)
-
         # Right panel
         self._setup_panel(panels_layout, "Source Folder 2", "right",
                           self.scan_right, self.export_right, self.import_txt_right,
@@ -406,7 +460,6 @@ class FolderStructureApp(QMainWindow):
         bottom_layout.setContentsMargins(0, 12, 0, 0)
         self.main_layout.addLayout(bottom_layout)
 
-        # Row 1: Replicate + Compare + Replicate
         row1 = QHBoxLayout()
         row1.setSpacing(40)
         row1.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -430,15 +483,18 @@ class FolderStructureApp(QMainWindow):
         btn_rep_right.clicked.connect(self.replicate_right)
         row1.addWidget(btn_rep_right)
 
-        # ── Divider ──
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet("color: #d0d0d0;")
         bottom_layout.addWidget(divider)
 
-        # Row 2: Batch Rename section
+        LABEL_STYLE = (
+            "font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; "
+            "font-size: 12px; color: #e0e0e0;"
+        )
+
         rename_label = QLabel("Batch Rename")
-        rename_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-weight: 600; font-size: 13px; color: #e0e0e0;")
+        rename_label.setStyleSheet(LABEL_STYLE + " font-weight: 600; font-size: 13px;")
         rename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(rename_label)
 
@@ -447,7 +503,7 @@ class FolderStructureApp(QMainWindow):
             "Right preview = the final names after renaming   |   "
             "Names are matched line-by-line in the same order."
         )
-        info_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0;")
+        info_label.setStyleSheet(LABEL_STYLE)
         info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label)
 
@@ -455,11 +511,10 @@ class FolderStructureApp(QMainWindow):
             "Clicking the button below will rename all items in the Left source folder "
             "so that every current name is replaced with the corresponding name from the Right preview."
         )
-        info_label2.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #e0e0e0;")
+        info_label2.setStyleSheet(LABEL_STYLE)
         info_label2.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bottom_layout.addWidget(info_label2)
 
-        # Compare line-by-line button
         row_compare_names = QHBoxLayout()
         row_compare_names.setSpacing(20)
         row_compare_names.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -468,21 +523,17 @@ class FolderStructureApp(QMainWindow):
         self.btn_compare_names = QPushButton("Compare Left and Right Names Line by Line")
         self.btn_compare_names.setStyleSheet("""
             QPushButton {
-                background-color: #707070;
-                color: white;
-                font-weight: bold;
-                font-size: 13px;
-                border-radius: 6px;
+                background-color: #707070; color: white;
+                font-weight: bold; font-size: 13px; border-radius: 6px;
             }
-            QPushButton:hover { background-color: #888888; }
-            QPushButton:pressed { background-color: #555555; }
+            QPushButton:hover  { background-color: #888888; }
+            QPushButton:pressed{ background-color: #555555; }
         """)
         self.btn_compare_names.setFixedHeight(32)
         self.btn_compare_names.setFixedWidth(520)
         self.btn_compare_names.clicked.connect(self.toggle_line_compare)
         row_compare_names.addWidget(self.btn_compare_names)
 
-        # Legend
         legend_layout = QHBoxLayout()
         legend_layout.setSpacing(20)
         legend_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -499,7 +550,10 @@ class FolderStructureApp(QMainWindow):
                 f"background-color: {color_hex}; border: 1px solid #999; border-radius: 4px;"
             )
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #e0e0e0; font-weight: 600;")
+            lbl.setStyleSheet(
+                "font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; "
+                "font-size: 11px; color: #e0e0e0; font-weight: 600;"
+            )
             hl.addWidget(swatch)
             hl.addWidget(lbl)
             return w
@@ -508,7 +562,6 @@ class FolderStructureApp(QMainWindow):
         legend_layout.addWidget(_legend_item("#f0b8b8", "Different names on same line"))
         legend_layout.addWidget(_legend_item("#f0f0b0", "Line exists on one side only"))
 
-        # Rename button
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -517,21 +570,17 @@ class FolderStructureApp(QMainWindow):
         btn_rename = QPushButton("⟳  Apply Right Preview Names to Left Source Folder")
         btn_rename.setStyleSheet("""
             QPushButton {
-                background-color: #e65c00;
-                color: white;
-                font-weight: bold;
-                font-size: 13px;
-                min-width: 380px;
-                border-radius: 6px;
+                background-color: #e65c00; color: white;
+                font-weight: bold; font-size: 13px;
+                min-width: 380px; border-radius: 6px;
             }
-            QPushButton:hover { background-color: #ff6a00; }
-            QPushButton:pressed { background-color: #c24f00; }
+            QPushButton:hover  { background-color: #ff6a00; }
+            QPushButton:pressed{ background-color: #c24f00; }
         """)
         btn_rename.setFixedHeight(32)
         btn_rename.clicked.connect(self.batch_rename)
         row2.addWidget(btn_rename)
 
-        # Copyright
         copyright_layout = QHBoxLayout()
         copyright_layout.setContentsMargins(0, 8, 0, 4)
         copyright_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -540,10 +589,10 @@ class FolderStructureApp(QMainWindow):
         copyright_label.setStyleSheet("color: #666666; font-size: 12px; font-style: italic;")
         copyright_layout.addWidget(copyright_label)
 
-        self._line_compare_active = False
+        self._line_compare_active  = False
         self._coloring_in_progress = False
-        self._sync_scroll_active = False
-        self._syncing_scroll = False   # reentrancy guard
+        self._sync_scroll_active   = False
+        self._syncing_scroll       = False
         self._load_last_paths()
 
     # ── Style helpers ────────────────────────────────────────────────────────
@@ -553,8 +602,8 @@ class FolderStructureApp(QMainWindow):
                 background-color: #0066cc; color: white;
                 font-weight: bold; min-width: 220px; border-radius: 6px;
             }
-            QPushButton:hover { background-color: #0077e6; }
-            QPushButton:pressed { background-color: #0055b3; }
+            QPushButton:hover  { background-color: #0077e6; }
+            QPushButton:pressed{ background-color: #0055b3; }
         """
 
     def _green_btn_style(self):
@@ -563,12 +612,13 @@ class FolderStructureApp(QMainWindow):
                 background-color: #4CAF50; color: white;
                 font-weight: bold; min-width: 220px; border-radius: 6px;
             }
-            QPushButton:hover { background-color: #66BB6A; }
-            QPushButton:pressed { background-color: #388E3C; }
+            QPushButton:hover  { background-color: #66BB6A; }
+            QPushButton:pressed{ background-color: #388E3C; }
         """
 
     # ── Panel setup ──────────────────────────────────────────────────────────
-    def _setup_panel(self, parent_layout, title_text, prefix, scan_cb, export_cb, import_cb, browse_source_cb):
+    def _setup_panel(self, parent_layout, title_text, prefix,
+                     scan_cb, export_cb, import_cb, browse_source_cb):
         layout = QVBoxLayout()
         layout.setSpacing(10)
         parent_layout.addLayout(layout, stretch=1)
@@ -577,7 +627,6 @@ class FolderStructureApp(QMainWindow):
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
 
-        # Source path
         path_layout = QHBoxLayout()
         path_layout.setSpacing(8)
         path_label = QLabel("Source:")
@@ -594,7 +643,6 @@ class FolderStructureApp(QMainWindow):
         layout.addLayout(path_layout)
         setattr(self, f"{prefix}_path_edit", edit)
 
-        # ── Scan options grid (depth + content aligned in one row) ──
         options_layout = QHBoxLayout()
         options_layout.setSpacing(24)
 
@@ -607,7 +655,6 @@ class FolderStructureApp(QMainWindow):
         options_layout.addWidget(radio_only_root)
         options_layout.addWidget(radio_recursive)
 
-        # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setStyleSheet("color: #aaaaaa;")
@@ -618,7 +665,6 @@ class FolderStructureApp(QMainWindow):
         cb_files = QCheckBox("File names")
         cb_files.setChecked(False)
 
-        # Keep at least one checked
         def make_guard(this_cb, other_cb):
             def guard(state):
                 if not this_cb.isChecked() and not other_cb.isChecked():
@@ -635,12 +681,11 @@ class FolderStructureApp(QMainWindow):
         setattr(self, f"{prefix}_radio_only_root", radio_only_root)
         setattr(self, f"{prefix}_radio_recursive", radio_recursive)
         setattr(self, f"{prefix}_cb_folders", cb_folders)
-        setattr(self, f"{prefix}_cb_files", cb_files)
+        setattr(self, f"{prefix}_cb_files",   cb_files)
 
-        # ── Action buttons ──
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
-        btn_scan = QPushButton("Scan")
+        btn_scan   = QPushButton("Scan")
         btn_export = QPushButton("Export Previewed TXT")
         btn_import = QPushButton("Import TXT")
         btn_scan.clicked.connect(scan_cb)
@@ -667,42 +712,34 @@ class FolderStructureApp(QMainWindow):
             with open(LAST_PATHS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Paths
-            if "left" in data and os.path.isdir(data["left"]):
+            if "left"  in data and os.path.isdir(data["left"]):
                 self.left_path_edit.setText(data["left"])
             if "right" in data and os.path.isdir(data["right"]):
                 self.right_path_edit.setText(data["right"])
 
-            # Scan options — left
             if "left_recursive" in data:
                 if data["left_recursive"]:
                     self.left_radio_recursive.setChecked(True)
                 else:
                     self.left_radio_only_root.setChecked(True)
-            # Restore checkboxes: disconnect guards, set both, reconnect.
-            # This prevents the guard from forcing one back on while we set the other.
             if "left_folders" in data and "left_files" in data:
-                lf = bool(data["left_folders"])
-                li = bool(data["left_files"])
+                lf, li = bool(data["left_folders"]), bool(data["left_files"])
                 self.left_cb_folders.blockSignals(True)
                 self.left_cb_files.blockSignals(True)
                 self.left_cb_folders.setChecked(lf)
                 self.left_cb_files.setChecked(li)
-                # Guarantee at least one is checked
                 if not lf and not li:
                     self.left_cb_folders.setChecked(True)
                 self.left_cb_folders.blockSignals(False)
                 self.left_cb_files.blockSignals(False)
 
-            # Scan options — right
             if "right_recursive" in data:
                 if data["right_recursive"]:
                     self.right_radio_recursive.setChecked(True)
                 else:
                     self.right_radio_only_root.setChecked(True)
             if "right_folders" in data and "right_files" in data:
-                rf = bool(data["right_folders"])
-                ri = bool(data["right_files"])
+                rf, ri = bool(data["right_folders"]), bool(data["right_files"])
                 self.right_cb_folders.blockSignals(True)
                 self.right_cb_files.blockSignals(True)
                 self.right_cb_folders.setChecked(rf)
@@ -712,9 +749,8 @@ class FolderStructureApp(QMainWindow):
                 self.right_cb_folders.blockSignals(False)
                 self.right_cb_files.blockSignals(False)
 
-            # Preview font
-            family = data.get("font_family", "SF Mono")
-            size   = int(data.get("font_size", 12))
+            family = data.get("font_family", EDITOR_FONT_FAMILY)
+            size   = int(data.get("font_size",   EDITOR_FONT_SIZE))
             if family and size > 0:
                 font = QFont(family, size)
                 self.left_preview.editor.setFont(font)
@@ -725,18 +761,16 @@ class FolderStructureApp(QMainWindow):
 
     def closeEvent(self, event):
         data = {
-            "left":  self.left_path_edit.text().strip(),
-            "right": self.right_path_edit.text().strip(),
-            # Scan options
-            "left_recursive":       self.left_radio_recursive.isChecked(),
-            "left_folders":         self.left_cb_folders.isChecked(),
-            "left_files":           self.left_cb_files.isChecked(),
-            "right_recursive":      self.right_radio_recursive.isChecked(),
-            "right_folders":        self.right_cb_folders.isChecked(),
-            "right_files":          self.right_cb_files.isChecked(),
-            # Preview font
-            "font_family":          self.left_preview.editor.font().family(),
-            "font_size":            self.left_preview.editor.font().pointSize(),
+            "left":             self.left_path_edit.text().strip(),
+            "right":            self.right_path_edit.text().strip(),
+            "left_recursive":   self.left_radio_recursive.isChecked(),
+            "left_folders":     self.left_cb_folders.isChecked(),
+            "left_files":       self.left_cb_files.isChecked(),
+            "right_recursive":  self.right_radio_recursive.isChecked(),
+            "right_folders":    self.right_cb_folders.isChecked(),
+            "right_files":      self.right_cb_files.isChecked(),
+            "font_family":      self.left_preview.editor.font().family(),
+            "font_size":        self.left_preview.editor.font().pointSize(),
         }
         try:
             with open(LAST_PATHS_FILE, "w", encoding="utf-8") as f:
@@ -745,7 +779,7 @@ class FolderStructureApp(QMainWindow):
             pass
         super().closeEvent(event)
 
-    # ── Sync scroll ─────────────────────────────────────────────────────────
+    # ── Sync scroll ──────────────────────────────────────────────────────────
     def _on_sync_scroll_toggled(self, state):
         self._sync_scroll_active = bool(state)
         if self._sync_scroll_active:
@@ -774,11 +808,7 @@ class FolderStructureApp(QMainWindow):
             l_bar = self.left_preview.editor.verticalScrollBar()
             l_max = l_bar.maximum()
             r_max = r_bar.maximum()
-            if l_max > 0:
-                ratio = value / l_max
-                r_bar.setValue(int(ratio * r_max))
-            else:
-                r_bar.setValue(0)
+            r_bar.setValue(int(value / l_max * r_max) if l_max > 0 else 0)
         finally:
             self._syncing_scroll = False
 
@@ -791,11 +821,7 @@ class FolderStructureApp(QMainWindow):
             r_bar = self.right_preview.editor.verticalScrollBar()
             r_max = r_bar.maximum()
             l_max = l_bar.maximum()
-            if r_max > 0:
-                ratio = value / r_max
-                l_bar.setValue(int(ratio * l_max))
-            else:
-                l_bar.setValue(0)
+            l_bar.setValue(int(value / r_max * l_max) if r_max > 0 else 0)
         finally:
             self._syncing_scroll = False
 
@@ -806,32 +832,30 @@ class FolderStructureApp(QMainWindow):
         if not os.path.isdir(path):
             QMessageBox.warning(self, "Error", "Selected source path is not a valid folder.")
             return
-        recursive = getattr(self, f"{prefix}_radio_recursive").isChecked()
+        recursive       = getattr(self, f"{prefix}_radio_recursive").isChecked()
         include_folders = getattr(self, f"{prefix}_cb_folders").isChecked()
-        include_files = getattr(self, f"{prefix}_cb_files").isChecked()
+        include_files   = getattr(self, f"{prefix}_cb_files").isChecked()
         try:
             lines = get_folder_structure(path, recursive, include_folders, include_files)
-            # Pause compare while loading new content to prevent crash.
             self._pause_compare()
             getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
             self._resume_compare()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot read structure:\n{str(e)}")
 
-    def scan_left(self):
-        self._do_scan("left")
-
-    def scan_right(self):
-        self._do_scan("right")
+    def scan_left(self):  self._do_scan("left")
+    def scan_right(self): self._do_scan("right")
 
     # ── Browse ───────────────────────────────────────────────────────────────
     def browse_left_source(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.left_path_edit.text())
+        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder",
+                                                  self.left_path_edit.text())
         if folder:
             self.left_path_edit.setText(folder)
 
     def browse_right_source(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder", self.right_path_edit.text())
+        folder = QFileDialog.getExistingDirectory(self, "Select Source Folder",
+                                                  self.right_path_edit.text())
         if folder:
             self.right_path_edit.setText(folder)
 
@@ -840,12 +864,11 @@ class FolderStructureApp(QMainWindow):
         if not content.strip():
             QMessageBox.warning(self, "Nothing to export", "The preview is empty.")
             return
-
-        today = date.today().strftime("%Y.%m.%d")
+        today       = date.today().strftime("%Y.%m.%d")
         folder_name = os.path.basename(source_path)
-        safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in folder_name).strip("_")
-        base_name = f"{today}_folder-structure_{safe_name}.txt"
-        txt_path = os.path.join(source_path, base_name)
+        safe_name   = "".join(c if c.isalnum() or c in " -_" else "_" for c in folder_name).strip("_")
+        base_name   = f"{today}_folder-structure_{safe_name}.txt"
+        txt_path    = os.path.join(source_path, base_name)
 
         if not os.path.exists(txt_path):
             try:
@@ -861,8 +884,8 @@ class FolderStructureApp(QMainWindow):
         msg.setIcon(QMessageBox.Icon.Question)
         msg.setText(f"The file already exists:\n{txt_path}")
         msg.setInformativeText("What would you like to do?")
-        overwrite_btn = msg.addButton("Overwrite", QMessageBox.ButtonRole.YesRole)
-        newfile_btn = msg.addButton("Create numbered copy", QMessageBox.ButtonRole.NoRole)
+        overwrite_btn = msg.addButton("Overwrite",            QMessageBox.ButtonRole.YesRole)
+        newfile_btn   = msg.addButton("Create numbered copy", QMessageBox.ButtonRole.NoRole)
         msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         msg.exec()
 
@@ -877,7 +900,8 @@ class FolderStructureApp(QMainWindow):
         elif clicked == newfile_btn:
             i = 1
             while True:
-                new_path = os.path.join(source_path, f"{today}_folder-structure_{safe_name}_{i:02d}.txt")
+                new_path = os.path.join(source_path,
+                    f"{today}_folder-structure_{safe_name}_{i:02d}.txt")
                 if not os.path.exists(new_path):
                     try:
                         with open(new_path, "w", encoding="utf-8") as f:
@@ -923,44 +947,28 @@ class FolderStructureApp(QMainWindow):
             return
         try:
             with open(txt_file, encoding="utf-8") as f:
-                lines = [line.rstrip() for line in f if line.strip() and not line.strip().startswith('#')]
+                lines = [line.rstrip() for line in f
+                         if line.strip() and not line.strip().startswith('#')]
             self._pause_compare()
             getattr(self, f"{prefix}_preview").setPlainText("\n".join(lines))
             self._resume_compare()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot load TXT file:\n{str(e)}")
 
-    def import_txt_left(self):
-        self._import_txt("left")
+    def import_txt_left(self):  self._import_txt("left")
+    def import_txt_right(self): self._import_txt("right")
 
-    def import_txt_right(self):
-        self._import_txt("right")
-
-    # ── Line-by-line color compare ──────────────────────────────────────────
-    #
-    # Design:
-    #   • _line_compare_active  — master on/off flag
-    #   • _coloring_in_progress — reentrancy guard; prevents the cursor edits
-    #     inside _apply_line_colors from re-triggering the timer
-    #   • QTimer (150 ms, single-shot) — debounces rapid contentsChanged events
-    #     (many per keystroke) into one deferred call AFTER Qt finishes the edit
-    #   • LineNumberedEditor.setPlainText() blocks all doc signals while
-    #     replacing content (scan / import), so the timer never fires mid-replace
-    #
+    # ── Line-by-line color compare ───────────────────────────────────────────
     def _both_previews_have_content(self):
-        """Return True only when both previews contain at least one non-empty line."""
-        l = self.left_preview.toPlainText().strip()
-        r = self.right_preview.toPlainText().strip()
-        return bool(l) and bool(r)
+        return bool(self.left_preview.toPlainText().strip()) and \
+               bool(self.right_preview.toPlainText().strip())
 
     def _pause_compare(self):
-        """Temporarily suspend compare coloring during bulk content replacement."""
         if hasattr(self, '_compare_timer'):
             self._compare_timer.stop()
-        self._coloring_in_progress = True   # block any stray signals
+        self._coloring_in_progress = True
 
     def _resume_compare(self):
-        """Re-enable compare coloring after bulk content replacement."""
         self._coloring_in_progress = False
         if self._line_compare_active:
             if self._both_previews_have_content():
@@ -969,7 +977,6 @@ class FolderStructureApp(QMainWindow):
                 self._clear_line_colors()
 
     def toggle_line_compare(self):
-        # If turning ON but both previews are empty/one-sided, show message.
         if not self._line_compare_active and not self._both_previews_have_content():
             QMessageBox.information(
                 self, "Compare Names",
@@ -982,17 +989,12 @@ class FolderStructureApp(QMainWindow):
             self.btn_compare_names.setText("Compare Left and Right Names Line by Line  ✔  ON")
             self.btn_compare_names.setStyleSheet("""
                 QPushButton {
-                    background-color: #4CAF50;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 13px;
-                    border-radius: 6px;
+                    background-color: #4CAF50; color: white;
+                    font-weight: bold; font-size: 13px; border-radius: 6px;
                 }
-                QPushButton:hover { background-color: #66BB6A; }
-                QPushButton:pressed { background-color: #388E3C; }
+                QPushButton:hover  { background-color: #66BB6A; }
+                QPushButton:pressed{ background-color: #388E3C; }
             """)
-            # Create timer once; recreating each toggle would accumulate
-            # duplicate connections.
             if not hasattr(self, '_compare_timer'):
                 from PyQt6.QtCore import QTimer
                 self._compare_timer = QTimer(self)
@@ -1006,28 +1008,22 @@ class FolderStructureApp(QMainWindow):
             self.btn_compare_names.setText("Compare Left and Right Names Line by Line")
             self.btn_compare_names.setStyleSheet("""
                 QPushButton {
-                    background-color: #707070;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 13px;
-                    border-radius: 6px;
+                    background-color: #707070; color: white;
+                    font-weight: bold; font-size: 13px; border-radius: 6px;
                 }
-                QPushButton:hover { background-color: #888888; }
-                QPushButton:pressed { background-color: #555555; }
+                QPushButton:hover  { background-color: #888888; }
+                QPushButton:pressed{ background-color: #555555; }
             """)
             if hasattr(self, '_compare_timer'):
                 self._compare_timer.stop()
             self._clear_line_colors()
 
     def _schedule_color_update(self):
-        """Called by contentsChanged. Only schedules update when active and
-        not currently inside _apply_line_colors (reentrancy guard)."""
         if self._line_compare_active and not self._coloring_in_progress:
             if hasattr(self, '_compare_timer'):
                 self._compare_timer.start()
 
     def _clear_line_colors(self):
-        """Remove all background colors from both previews."""
         self._coloring_in_progress = True
         try:
             for preview in (self.left_preview, self.right_preview):
@@ -1050,11 +1046,7 @@ class FolderStructureApp(QMainWindow):
             self._coloring_in_progress = False
 
     def _apply_line_colors(self):
-        """Color each line in both previews by line-index comparison.
-        Fully guarded against reentrancy and empty-document edge cases."""
-        if self._coloring_in_progress:
-            return
-        if not self._line_compare_active:
+        if self._coloring_in_progress or not self._line_compare_active:
             return
         self._coloring_in_progress = True
         try:
@@ -1098,7 +1090,7 @@ class FolderStructureApp(QMainWindow):
 
     # ── Compare ──────────────────────────────────────────────────────────────
     def compare_previews(self):
-        left_lines = [l.rstrip() for l in self.left_preview.toPlainText().splitlines()]
+        left_lines  = [l.rstrip() for l in self.left_preview.toPlainText().splitlines()]
         right_lines = [l.rstrip() for l in self.right_preview.toPlainText().splitlines()]
         if not left_lines and not right_lines:
             QMessageBox.information(self, "Compare", "Both previews are empty.")
@@ -1132,37 +1124,15 @@ class FolderStructureApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to replicate:\n{str(e)}")
 
-    def replicate_left(self):
-        self._replicate("left")
-
-    def replicate_right(self):
-        self._replicate("right")
+    def replicate_left(self):  self._replicate("left")
+    def replicate_right(self): self._replicate("right")
 
     # ── Batch Rename ─────────────────────────────────────────────────────────
     def batch_rename(self):
-        """
-        Strict index-based rename — NO filesystem search whatsoever.
-
-        The LEFT preview encodes the current full path of each item via
-        indentation (2 spaces per depth level), exactly as produced by Scan.
-        The RIGHT preview encodes the desired final name for each item at the
-        same line index.
-
-        For line N:
-          - LEFT line N  → reconstruct the current absolute path using the
-                           indent-based stack (same algorithm as create_from_lines)
-          - RIGHT line N → take only the bare name (.strip()) as the new name
-          - os.rename(old_full_path, parent_of_old / new_name)  — direct, no search
-
-        After a rename the in-memory path stack is updated so that any children
-        of a renamed folder still resolve correctly.
-        """
-        left_lines_raw = self.left_preview.toPlainText().splitlines()
+        left_lines_raw  = self.left_preview.toPlainText().splitlines()
         right_lines_raw = self.right_preview.toPlainText().splitlines()
 
-        # Keep raw lines (with indentation) for path reconstruction;
-        # filter only truly empty lines so indices stay aligned.
-        left_lines = [l.rstrip() for l in left_lines_raw if l.strip()]
+        left_lines  = [l.rstrip() for l in left_lines_raw  if l.strip()]
         right_lines = [l.rstrip() for l in right_lines_raw if l.strip()]
 
         if not left_lines or not right_lines:
@@ -1172,7 +1142,8 @@ class FolderStructureApp(QMainWindow):
         if len(left_lines) != len(right_lines):
             QMessageBox.warning(
                 self, "Batch Rename",
-                f"Line count mismatch!\nLeft: {len(left_lines)} lines  |  Right: {len(right_lines)} lines\n"
+                f"Line count mismatch!\nLeft: {len(left_lines)} lines  |  "
+                f"Right: {len(right_lines)} lines\n"
                 "Both previews must have the same number of non-empty lines."
             )
             return
@@ -1183,27 +1154,20 @@ class FolderStructureApp(QMainWindow):
                                 "Please set a valid Left source folder path.")
             return
 
-        # ── Reconstruct absolute paths from indented left preview ──
-        # stack[level] = current absolute path segment at that depth
-        path_stack = [root]   # level 0 = root itself
-        left_abs_paths = []   # one entry per left_line
+        path_stack     = [root]
+        left_abs_paths = []
 
         for line in left_lines:
             indent = len(line) - len(line.lstrip())
-            level = indent // 2          # 0 = direct child of root
-            name = line.strip()
-
-            # Trim stack so parent is at path_stack[level]
-            # (level 0 child lives under path_stack[0] = root)
+            level  = indent // 2
+            name   = line.strip()
             while len(path_stack) > level + 1:
                 path_stack.pop()
-
             abs_path = os.path.join(path_stack[-1], name)
             left_abs_paths.append(abs_path)
-            path_stack.append(abs_path)   # becomes parent for deeper items
+            path_stack.append(abs_path)
 
-        # ── Build rename operations (only lines where name actually changes) ──
-        ops = []   # list of (old_abs_path, new_abs_path, old_name, new_name)
+        ops = []
         for i, (old_abs, right_line) in enumerate(zip(left_abs_paths, right_lines)):
             old_name = os.path.basename(old_abs)
             new_name = right_line.strip()
@@ -1213,10 +1177,11 @@ class FolderStructureApp(QMainWindow):
             ops.append((old_abs, new_abs, old_name, new_name))
 
         if not ops:
-            QMessageBox.information(self, "Batch Rename", "No differences found — nothing to rename.")
+            QMessageBox.information(self, "Batch Rename",
+                                    "No differences found — nothing to rename.")
             return
 
-        # ── Confirm — scrollable custom dialog ──
+        # ── Confirm dialog ──
         confirm_dlg = QDialog(self)
         confirm_dlg.setWindowTitle("Confirm Batch Rename")
         confirm_dlg.resize(680, 420)
@@ -1239,7 +1204,10 @@ class FolderStructureApp(QMainWindow):
         col_label = QLabel(
             "<b>Current name (left preview)</b>  →  <b>New name (right preview)</b>"
         )
-        col_label.setStyleSheet("font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; font-size: 12px; color: #555;")
+        col_label.setStyleSheet(
+            "font-family: 'Segoe UI', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; "
+            "font-size: 12px; color: #555;"
+        )
         c_layout.addWidget(col_label)
 
         pairs_lines = "\n".join(f"  {o}  →  {n}" for _, _, o, n in ops)
@@ -1261,7 +1229,10 @@ class FolderStructureApp(QMainWindow):
         c_ok.setFixedHeight(34)
         c_ok.setFixedWidth(120)
         c_ok.setDefault(True)
-        c_ok.setStyleSheet("background-color: #e65c00; color: white; font-weight: bold; border-radius: 4px;")
+        c_ok.setStyleSheet(
+            "background-color: #e65c00; color: white; "
+            "font-weight: bold; border-radius: 4px;"
+        )
         c_ok.clicked.connect(confirm_dlg.accept)
         c_btn_row.addWidget(c_ok)
         c_layout.addLayout(c_btn_row)
@@ -1269,26 +1240,12 @@ class FolderStructureApp(QMainWindow):
         if confirm_dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # ── Execute renames — safe two-phase with full rollback protection ──
-        #
-        # Phase 1: original → unique temp name  (never conflicts)
-        # Phase 2: temp → final name
-        #
-        # If Phase 2 fails for any item, we immediately rename the temp back
-        # to the original name so no file is ever left with a broken temp name.
-        #
-        # _resolve() uses os.sep-aware prefix matching to correctly handle
-        # nested paths when a parent folder was already renamed.
-
+        # ── Execute: safe two-phase with rollback ──
         import uuid
 
-        # original old_abs → temp_abs currently on disk
         current_abs_map = {}
 
         def _resolve(path):
-            """Return the current on-disk path of `path`, accounting for any
-            ancestor that was already moved to a temp name."""
-            # Sort by length descending so deepest (most specific) match wins
             for old_prefix in sorted(current_abs_map, key=len, reverse=True):
                 cur_prefix = current_abs_map[old_prefix]
                 if path == old_prefix:
@@ -1297,12 +1254,11 @@ class FolderStructureApp(QMainWindow):
                     return cur_prefix + path[len(old_prefix):]
             return path
 
-        renamed  = []   # "old → new"  successfully completed
-        failed   = []   # error messages
-        skipped  = []   # items not attempted because path not found
-        phase2_ops = [] # (temp_abs, final_abs, original_abs, old_name, new_name)
+        renamed    = []
+        failed     = []
+        skipped    = []
+        phase2_ops = []
 
-        # ── Phase 1: source → temp (never conflicts with anything) ──
         for old_abs, new_abs, old_name, new_name in ops:
             old_resolved = _resolve(old_abs)
             if not os.path.exists(old_resolved):
@@ -1311,7 +1267,7 @@ class FolderStructureApp(QMainWindow):
                     f'  Expected path not found: {old_resolved}'
                 )
                 continue
-            parent   = os.path.dirname(old_resolved)
+            parent    = os.path.dirname(old_resolved)
             temp_name = f"__structify_tmp_{uuid.uuid4().hex}"
             temp_abs  = os.path.join(parent, temp_name)
             try:
@@ -1321,28 +1277,33 @@ class FolderStructureApp(QMainWindow):
                                    old_resolved, old_name, new_name))
             except Exception as e:
                 failed.append(
-                    f'FAILED Phase 1  "{old_name}"\n  {old_resolved}  \u2192  (temp)\n  Error: {e}'
+                    f'FAILED Phase 1  "{old_name}"\n'
+                    f'  {old_resolved}  →  (temp)\n'
+                    f'  Error: {e}'
                 )
 
-        # ── Phase 2: temp → final name — with immediate rollback on failure ──
         for temp_abs, final_abs, original_abs, old_name, new_name in phase2_ops:
             try:
                 os.rename(temp_abs, final_abs)
                 renamed.append(f"{old_name}  →  {new_name}")
             except Exception as e:
-                # Rename BACK to original immediately — no file left stranded
                 try:
                     os.rename(temp_abs, original_abs)
-                    rollback_note = f"  (✔ safely rolled back to original name)"
-                except Exception as re:
+                    rollback_note = "  (✔ safely rolled back to original name)"
+                except Exception as re2:
                     rollback_note = (
-                        f"  ⚠ ROLLBACK FAILED — file is currently named:\n  {temp_abs}\n  Rename it back manually to: {os.path.basename(original_abs)}\n  Rollback error: {re}"
+                        f"  ⚠ ROLLBACK FAILED — file is currently named:\n"
+                        f"  {temp_abs}\n"
+                        f"  Rename it back manually to: {os.path.basename(original_abs)}\n"
+                        f"  Rollback error: {re2}"
                     )
                 failed.append(
-                    f'FAILED Phase 2  "{old_name}"  →  "{new_name}"\n  Error: {e}\n{rollback_note}'
+                    f'FAILED Phase 2  "{old_name}"  →  "{new_name}"\n'
+                    f'  Error: {e}\n'
+                    f'{rollback_note}'
                 )
 
-        # ── Result summary — scrollable custom dialog ──
+        # ── Result dialog ──
         summary_lines = []
         if renamed:
             summary_lines.append(f"✅  Renamed {len(renamed)} item(s) successfully.")
@@ -1352,17 +1313,19 @@ class FolderStructureApp(QMainWindow):
         if skipped:
             if summary_lines:
                 summary_lines.append("")
-            summary_lines.append(f"⚠️  {len(skipped)} item(s) not found on disk (not attempted):")
+            summary_lines.append(
+                f"⚠️  {len(skipped)} item(s) not found on disk (not attempted):"
+            )
             summary_lines.append("")
-            for s_msg in skipped:
-                summary_lines.append(f"  {s_msg}")
+            for s in skipped:
+                summary_lines.append(f"  {s}")
         if failed:
             if summary_lines:
                 summary_lines.append("")
             summary_lines.append(f"❌  {len(failed)} error(s) — see details below:")
             summary_lines.append("")
-            for f_msg in failed:
-                summary_lines.append(f"  {f_msg}")
+            for fm in failed:
+                summary_lines.append(f"  {fm}")
                 summary_lines.append("")
 
         full_text = "\n".join(summary_lines)
@@ -1417,8 +1380,8 @@ class FolderStructureApp(QMainWindow):
         stack = [path]
         for line in lines:
             indent = len(line) - len(line.lstrip())
-            level = indent // 2
-            name = line.strip()
+            level  = indent // 2
+            name   = line.strip()
             while len(stack) > level + 1:
                 stack.pop()
             current = os.path.join(stack[-1], name)
